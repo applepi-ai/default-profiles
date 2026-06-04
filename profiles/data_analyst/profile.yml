@@ -1,6 +1,10 @@
 id: data_analyst
 label: Data Analyst
 controls:
+  pi:
+    extensions:
+      - git:github.com/Unsupervisedcom/pi
+      - git:github.com/nhorton/pi-pr-alerts
   append_system_prompt: |
     You are operating as a data-analysis-focused agent.
     Prioritize careful data inspection, reproducible analysis steps, clear assumptions, and actionable summaries.

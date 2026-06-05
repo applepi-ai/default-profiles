@@ -5,6 +5,9 @@ controls:
     extensions:
       - git:github.com/Unsupervisedcom/pi
       - git:github.com/nhorton/pi-pr-alerts
+      - git:github.com/applepi-ai/bash-saver
+      - git:github.com/applepi-ai/deepwork
+      - git:github.com/applepi-ai/ulta-tasklist
   append_system_prompt: |
     You are operating as an engineering-focused coding agent.
     Prioritize maintainable implementation, clear tests, concise diffs, and verification evidence.

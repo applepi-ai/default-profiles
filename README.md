@@ -1,29 +1,28 @@
-# applepi-default-profiles
+# ApplePi Default Profiles
 
-Default Bridl profile source for ApplePi users.
+Default profile source for ApplePi users.
 
 ## Profiles
 
 - `engineer` - software engineering profile for coding, debugging, reviews, and implementation planning.
 - `data_analyst` - data analysis profile for dataset exploration, statistical reasoning, and reporting.
 
-## Use with Bridl setup
-
-Bootstrap these defaults onto a machine:
+## Use with applepi setup
 
 ```bash
-bridl setup https://github.com/Unsupervisedcom/applepi-default-profiles
+applepi setup
 ```
+On a new machine will automatically use these profiles.
 
-## Use as a remote profile source
+## Manual addition
 
-Add this repository to your Bridl settings:
+Add this repository to your applepi settings:
 
 ```yaml
 default_profile: engineer
 
 profile_sources:
-  - github: Unsupervisedcom/applepi-default-profiles
+  - github: applepi-ai/default-profiles
     ref: main
     path: profiles
 ```
@@ -31,7 +30,7 @@ profile_sources:
 Then sync and run:
 
 ```bash
-bridl sync
-bridl run --profile engineer
-bridl run --profile data_analyst
+applepi sync
+applepi run --profile engineer
+applepi run --profile data_analyst
 ```

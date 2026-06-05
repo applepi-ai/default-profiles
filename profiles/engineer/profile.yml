@@ -3,7 +3,6 @@ label: Engineer
 controls:
   pi:
     extensions:
-      - git:github.com/Unsupervisedcom/pi
       - git:github.com/nhorton/pi-pr-alerts
       - git:github.com/applepi-ai/bash-saver
       - git:github.com/applepi-ai/deepwork

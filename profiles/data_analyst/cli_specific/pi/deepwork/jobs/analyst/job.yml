@@ -1,0 +1,258 @@
+name: analyst
+summary: Data analyst workflows for dataset analysis, metrics, experiments, insight briefs, and executive reports.
+
+step_arguments:
+  - name: analysis_goal
+    description: The user's analytical question, decision context, or reporting objective.
+    type: string
+  - name: available_evidence
+    description: Data files, query results, notes, dashboards, experiment materials, or other evidence available to inspect.
+    type: string
+  - name: analysis_plan
+    description: The clarified objective, assumptions, data inventory, method plan, and validation checks.
+    type: file_path
+  - name: data_profile
+    description: Data quality, schema, provenance, missingness, joins, outliers, and readiness assessment.
+    type: file_path
+  - name: metric_spec
+    description: Metric definition, formula, grain, source, segments, instrumentation, and guardrails.
+    type: file_path
+  - name: experiment_readout
+    description: Experiment validity assessment, effect estimate interpretation, risks, and recommendation.
+    type: file_path
+  - name: insight_brief
+    description: Concise evidence-backed business recommendation.
+    type: file_path
+  - name: executive_report
+    description: Leadership-ready report with findings, confidence, implications, risks, and next actions.
+    type: file_path
+  - name: completion_summary
+    description: Final verification summary confirming the workflow satisfied the analytical request.
+    type: string
+
+workflows:
+  analyze_dataset:
+    summary: Profile data, answer an analytical question, and produce an evidence-backed findings report.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Operate as a rigorous data analyst. Separate facts from interpretation. State assumptions, uncertainty, limitations, and validation checks. Do not expose secrets or unnecessary personal data.
+    steps:
+      - name: plan_analysis
+        instructions: |
+          Clarify the analytical request before computing or summarizing.
+
+          Produce an analysis plan that includes:
+          - Decision or question being answered
+          - Data/evidence inventory and file paths if known
+          - Required metric definitions and grains
+          - Assumptions and open questions
+          - Proposed descriptive, diagnostic, predictive, or causal method
+          - Data-quality checks to run
+          - Expected deliverable shape
+
+          If the request is ambiguous, ask the user before inventing product behavior or metric definitions.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: inspect_data
+        instructions: |
+          Inspect the available data or evidence according to the analysis plan.
+
+          Produce a data profile covering:
+          - Schema, provenance, time range, freshness, units, and grain
+          - Row counts, sample sizes, missingness, duplicates, outliers, and invalid values
+          - Join keys and join risks when multiple sources are involved
+          - Segment coverage and selection bias
+          - Privacy or sensitive-data concerns
+          - Whether the data can support the requested claim
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          data_profile: { required: true }
+
+      - name: synthesize_findings
+        instructions: |
+          Produce an evidence-backed analysis report.
+
+          Include:
+          - Executive answer and confidence level
+          - Methods used and why they are appropriate
+          - Key findings with cited evidence
+          - Tables or chart recommendations where helpful
+          - Business implications for customers, revenue, cost, profitability, risk, or prioritization
+          - Limitations, sensitivity checks, and open questions
+          - Recommended next actions
+        inputs:
+          analysis_plan: { required: true }
+          data_profile: { required: true }
+        outputs:
+          executive_report: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Review the report against the original analysis goal.
+
+          Confirm the report answers the question, cites evidence, states assumptions and limitations, and does not overclaim beyond the data. If anything remains unresolved, summarize the gap and the evidence needed next.
+        inputs:
+          analysis_goal: { required: true }
+          executive_report: { required: true }
+        outputs:
+          completion_summary: { required: true }
+
+  define_metrics:
+    summary: Define product or business metrics with formulas, source data, guardrails, and acceptance criteria.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Metric work must be precise. A useful metric definition names the decision it supports, formula, grain, population, exclusions, source of truth, freshness, owner, guardrails, and known failure modes.
+    steps:
+      - name: clarify_metric_need
+        instructions: |
+          Clarify the decision, behavior, product surface, user population, and cadence the metric must support. Identify any ambiguous terms and ask for clarification when needed.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: draft_metric_spec
+        instructions: |
+          Write a metric specification that includes:
+          - Metric name and plain-language definition
+          - Formula and numerator/denominator
+          - Entity grain, time grain, population, exclusions, and segments
+          - Source tables/events and required properties
+          - Freshness, quality checks, and backfill requirements
+          - Guardrail metrics and anti-gaming risks
+          - Acceptance criteria for instrumentation or dashboard work
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          metric_spec: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Verify the metric spec is implementable, unambiguous, and tied to a decision. Note any unresolved data contracts or instrumentation gaps.
+        inputs:
+          analysis_goal: { required: true }
+          metric_spec: { required: true }
+        outputs:
+          completion_summary: { required: true }
+
+  review_experiment:
+    summary: Review experiment design or results and produce a statistically disciplined decision readout.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Experiment analysis must separate observed differences from causal conclusions. Check assignment, exposure, sample size, metric validity, novelty effects, peeking, multiple testing, and practical significance.
+    steps:
+      - name: gather_context
+        instructions: |
+          Capture the hypothesis, treatment, control, assignment unit, exposure window, primary metric, guardrails, sample size, decision threshold, and experiment timeline. Flag missing context.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: assess_validity
+        instructions: |
+          Assess whether the design and data support a causal claim.
+
+          Cover:
+          - Randomization or assignment validity
+          - Sample ratio mismatch or exposure contamination
+          - Metric quality and guardrail behavior
+          - Power, uncertainty, confidence intervals, and practical significance
+          - Peeking, multiple testing, segment fishing, and novelty effects
+          - Sensitivity checks and alternative explanations
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          experiment_readout: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Verify the readout gives a clear ship/iterate/stop recommendation with confidence, caveats, and next validation steps. Do not allow causal overclaiming.
+        inputs:
+          analysis_goal: { required: true }
+          experiment_readout: { required: true }
+        outputs:
+          completion_summary: { required: true }
+
+  insight_brief:
+    summary: Synthesize mixed evidence into a concise business recommendation.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      An insight brief is decision-ready, not a data dump. Lead with the answer, confidence, evidence, tradeoffs, risks, and next action.
+    steps:
+      - name: scope_decision
+        instructions: |
+          Identify the decision, stakeholders, deadline, available evidence, constraints, and alternatives under consideration.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: write_brief
+        instructions: |
+          Write a concise insight brief with:
+          - Recommendation and confidence
+          - Evidence summary
+          - Customer, market, revenue, cost, risk, and sequencing implications as relevant
+          - Options considered and tradeoffs
+          - Caveats and open questions
+          - Next actions with owners where known
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          insight_brief: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Confirm the brief is actionable, evidence-backed, caveated, and aligned to the stated decision. Summarize any remaining gaps.
+        inputs:
+          analysis_goal: { required: true }
+          insight_brief: { required: true }
+        outputs:
+          completion_summary: { required: true }
+
+  executive_report:
+    summary: Create a leadership-ready analytical report with recommendations, risks, and next actions.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Executive reports must be concise, structured, and decisive. They should make evidence and uncertainty visible while giving leadership a clear path forward.
+    steps:
+      - name: gather_evidence
+        instructions: |
+          Inventory the evidence and define the report objective, audience, decision, timeline, and required level of detail.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: write_report
+        instructions: |
+          Produce an executive report with:
+          - One-page summary
+          - Key findings and confidence
+          - Evidence and method notes
+          - Business implications
+          - Risks, limitations, and dissenting evidence
+          - Recommended action plan and validation checkpoints
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          executive_report: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Verify the report is leadership-ready: concise, evidence-backed, clear about confidence, and explicit about actions and risks.
+        inputs:
+          analysis_goal: { required: true }
+          executive_report: { required: true }
+        outputs:
+          completion_summary: { required: true }

@@ -5,14 +5,39 @@ Default profile source for ApplePi users.
 ## Profiles
 
 - `engineer` - software engineering profile for coding, debugging, reviews, and implementation planning.
-- `data_analyst` - data analysis profile for dataset exploration, statistical reasoning, and reporting.
+- `data_analyst` - senior data analysis profile for dataset exploration, metric design, experiment review, business insight briefs, and executive reporting. Includes profile-bundled DeepWork analyst jobs.
+
+## Data analyst DeepWork jobs
+
+The `data_analyst` profile includes a DeepWork job bundle under:
+
+```text
+profiles/data_analyst/cli_specific/pi/deepwork/jobs/
+```
+
+When launched by an ApplePi version that supports profile-bundled DeepWork jobs, the selected profile contributes this folder to `DEEPWORK_ADDITIONAL_JOBS_FOLDERS` so the DeepWork frontend can discover the `analyst` job. Profile-bundled jobs are isolated by default; the analyst profile keeps `controls.pi.allow_external_deepwork_jobs` false so inherited extra job folders do not broaden the default analyst surface.
+
+Included workflows:
+
+- `analyst/analyze_dataset` - inspect data quality and produce evidence-backed findings.
+- `analyst/define_metrics` - define product or business metrics, guardrails, and instrumentation acceptance criteria.
+- `analyst/review_experiment` - assess experiment design or results without causal overclaiming.
+- `analyst/insight_brief` - synthesize mixed evidence into a concise business recommendation.
+- `analyst/executive_report` - create a leadership-ready analytical report.
 
 ## Use with applepi setup
 
 ```bash
 applepi setup
 ```
+
 On a new machine will automatically use these profiles.
+
+To bootstrap directly from this repository:
+
+```bash
+applepi setup https://github.com/applepi-ai/default-profiles
+```
 
 ## Manual addition
 
@@ -34,3 +59,7 @@ applepi sync
 applepi run --profile engineer
 applepi run --profile data_analyst
 ```
+
+## Verify analyst jobs
+
+After syncing profiles and using an ApplePi version with profile-bundled job support, run the `data_analyst` profile and ask DeepWork for available workflows. The `analyst` job should appear with the workflows listed above.

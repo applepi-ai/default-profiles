@@ -1,0 +1,359 @@
+name: analyst
+summary: Data analyst workflows for dataset analysis, metrics, experiments, insight briefs, and executive reports.
+
+step_arguments:
+  - name: analysis_goal
+    description: The user's analytical question, decision context, or reporting objective.
+    type: string
+  - name: available_evidence
+    description: Data files, query results, notes, dashboards, experiment materials, or other evidence available to inspect.
+    type: string
+  - name: analysis_plan
+    description: The clarified objective, assumptions, data inventory, method plan, and validation checks.
+    type: file_path
+  - name: data_profile
+    description: Data quality, schema, provenance, missingness, joins, outliers, and readiness assessment.
+    type: file_path
+  - name: metric_spec
+    description: Metric definition, formula, grain, source, segments, instrumentation, and guardrails.
+    type: file_path
+  - name: experiment_readout
+    description: Experiment validity assessment, effect estimate interpretation, risks, and recommendation.
+    type: file_path
+  - name: insight_brief
+    description: Concise evidence-backed business recommendation.
+    type: file_path
+  - name: executive_report
+    description: Leadership-ready report with findings, confidence, implications, risks, and next actions.
+    type: file_path
+  - name: completion_summary
+    description: Final verification summary confirming the workflow satisfied the analytical request.
+    type: string
+  - name: finder_binary_path
+    description: Project-local Finder executable path, conventionally .deepwork/tmp/finder.
+    type: file_path
+  - name: finder_provenance
+    description: Provenance metadata for the downloaded Finder binary at .deepwork/tmp/finder.provenance.json.
+    type: file_path
+
+workflows:
+  analyze_dataset:
+    summary: Profile data, answer an analytical question, and produce an evidence-backed findings report.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Operate as a rigorous data analyst. Separate facts from interpretation. State assumptions, uncertainty, limitations, and validation checks. Do not expose secrets or unnecessary personal data.
+    steps:
+      - name: plan_analysis
+        instructions: |
+          Clarify the analytical request before computing or summarizing.
+
+          Produce an analysis plan that includes:
+          - Decision or question being answered
+          - Data/evidence inventory and file paths if known
+          - Required metric definitions and grains
+          - Assumptions and open questions
+          - Proposed descriptive, diagnostic, predictive, or causal method
+          - Data-quality checks to run
+          - Expected deliverable shape
+
+          If the request is ambiguous, ask the user before inventing product behavior or metric definitions.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: inspect_data
+        instructions: |
+          Inspect the available data or evidence according to the analysis plan.
+
+          Produce a data profile covering:
+          - Schema, provenance, time range, freshness, units, and grain
+          - Row counts, sample sizes, missingness, duplicates, outliers, and invalid values
+          - Join keys and join risks when multiple sources are involved
+          - Segment coverage and selection bias
+          - Privacy or sensitive-data concerns
+          - Whether the data can support the requested claim
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          data_profile: { required: true }
+
+      - name: synthesize_findings
+        instructions: |
+          Produce an evidence-backed analysis report.
+
+          Include:
+          - Executive answer and confidence level
+          - Methods used and why they are appropriate
+          - Key findings with cited evidence
+          - Tables or chart recommendations where helpful
+          - Business implications for customers, revenue, cost, profitability, risk, or prioritization
+          - Limitations, sensitivity checks, and open questions
+          - Recommended next actions
+        inputs:
+          analysis_plan: { required: true }
+          data_profile: { required: true }
+        outputs:
+          executive_report: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Review the report against the original analysis goal.
+
+          Confirm the report answers the question, cites evidence, states assumptions and limitations, and does not overclaim beyond the data. If anything remains unresolved, summarize the gap and the evidence needed next.
+        inputs:
+          analysis_goal: { required: true }
+          executive_report: { required: true }
+        outputs:
+          completion_summary: { required: true }
+
+
+  prepare_finder:
+    summary: Download or verify the project-local Finder binary used for pattern discovery.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Finder is an optional analyst runtime tool. Do not assume a global install. The profile-managed convention is a disposable project-local runtime cache at .deepwork/tmp/finder with provenance beside it.
+    steps:
+      - name: ensure_finder_binary
+        instructions: |
+          Ensure the Finder binary is available for this project.
+
+          Required behavior:
+          - Preferred path: `.deepwork/tmp/finder`.
+          - Provenance path: `.deepwork/tmp/finder.provenance.json`.
+          - If `.deepwork/tmp/finder` exists and is executable, do not download again.
+          - If it exists but is not executable, run `chmod +x .deepwork/tmp/finder` and verify it.
+          - If missing, detect the platform and download the correct binary:
+            - Linux: `https://cli.unsupervised.com/finder-free-linux`
+            - macOS arm64: `https://cli.unsupervised.com/finder-free-macos-arm`
+          - Write downloads to `.deepwork/tmp/.finder.download` first, then atomically move to `.deepwork/tmp/finder`.
+
+          Use this shell procedure unless the environment requires an equivalent:
+
+          ```bash
+          set -euo pipefail
+          mkdir -p .deepwork/tmp
+
+          FINDER_BIN=".deepwork/tmp/finder"
+          PROVENANCE=".deepwork/tmp/finder.provenance.json"
+
+          if [ -x "$FINDER_BIN" ]; then
+            echo "Finder already available at $FINDER_BIN"
+          else
+            if [ -f "$FINDER_BIN" ]; then
+              chmod +x "$FINDER_BIN"
+            fi
+
+            if [ ! -x "$FINDER_BIN" ]; then
+              os="$(uname -s)"
+              arch="$(uname -m)"
+              case "$os/$arch" in
+                Linux/*)
+                  url="https://cli.unsupervised.com/finder-free-linux"
+                  ;;
+                Darwin/arm64|Darwin/aarch64)
+                  url="https://cli.unsupervised.com/finder-free-macos-arm"
+                  ;;
+                *)
+                  echo "Unsupported Finder platform: $os/$arch" >&2
+                  exit 1
+                  ;;
+              esac
+
+              tmp=".deepwork/tmp/.finder.download"
+              curl -fL --retry 3 --connect-timeout 20 -o "$tmp" "$url"
+              mv "$tmp" "$FINDER_BIN"
+              chmod +x "$FINDER_BIN"
+
+              if command -v sha256sum >/dev/null 2>&1; then
+                sha256="$(sha256sum "$FINDER_BIN" | awk '{print $1}')"
+              elif command -v shasum >/dev/null 2>&1; then
+                sha256="$(shasum -a 256 "$FINDER_BIN" | awk '{print $1}')"
+              else
+                sha256="unknown"
+              fi
+
+              size_bytes="$(wc -c < "$FINDER_BIN" | tr -d ' ')"
+              downloaded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              export FINDER_URL="$url" FINDER_PLATFORM="$os/$arch" FINDER_SHA256="$sha256" FINDER_SIZE_BYTES="$size_bytes" FINDER_DOWNLOADED_AT="$downloaded_at" PROVENANCE
+              python3 -c 'import json, os; from pathlib import Path; Path(os.environ["PROVENANCE"]).write_text(json.dumps({"binary_path":".deepwork/tmp/finder","url":os.environ["FINDER_URL"],"platform":os.environ["FINDER_PLATFORM"],"sha256":os.environ["FINDER_SHA256"],"size_bytes":int(os.environ["FINDER_SIZE_BYTES"]),"downloaded_at":os.environ["FINDER_DOWNLOADED_AT"]}, indent=2) + "\n")'
+            fi
+          fi
+
+          "$FINDER_BIN" --help >/tmp/finder-help.txt 2>&1 || true
+          test -x "$FINDER_BIN"
+          ```
+        inputs:
+          analysis_goal: { required: false }
+        outputs:
+          finder_binary_path: { required: true }
+          finder_provenance: { required: false }
+
+      - name: verify_completes_request
+        instructions: |
+          Verify Finder is ready for downstream analyst work.
+
+          Confirm:
+          - `.deepwork/tmp/finder` exists and is executable.
+          - `.deepwork/tmp/finder.provenance.json` exists when a download occurred.
+          - If Finder could not be installed, the failure explains the unsupported platform or download problem clearly.
+        inputs:
+          finder_binary_path: { required: true }
+          finder_provenance: { required: false }
+        outputs:
+          completion_summary: { required: true }
+
+  define_metrics:
+    summary: Define product or business metrics with formulas, source data, guardrails, and acceptance criteria.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Metric work must be precise. A useful metric definition names the decision it supports, formula, grain, population, exclusions, source of truth, freshness, owner, guardrails, and known failure modes.
+    steps:
+      - name: clarify_metric_need
+        instructions: |
+          Clarify the decision, behavior, product surface, user population, and cadence the metric must support. Identify any ambiguous terms and ask for clarification when needed.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: draft_metric_spec
+        instructions: |
+          Write a metric specification that includes:
+          - Metric name and plain-language definition
+          - Formula and numerator/denominator
+          - Entity grain, time grain, population, exclusions, and segments
+          - Source tables/events and required properties
+          - Freshness, quality checks, and backfill requirements
+          - Guardrail metrics and anti-gaming risks
+          - Acceptance criteria for instrumentation or dashboard work
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          metric_spec: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Verify the metric spec is implementable, unambiguous, and tied to a decision. Note any unresolved data contracts or instrumentation gaps.
+        inputs:
+          analysis_goal: { required: true }
+          metric_spec: { required: true }
+        outputs:
+          completion_summary: { required: true }
+
+  review_experiment:
+    summary: Review experiment design or results and produce a statistically disciplined decision readout.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Experiment analysis must separate observed differences from causal conclusions. Check assignment, exposure, sample size, metric validity, novelty effects, peeking, multiple testing, and practical significance.
+    steps:
+      - name: gather_context
+        instructions: |
+          Capture the hypothesis, treatment, control, assignment unit, exposure window, primary metric, guardrails, sample size, decision threshold, and experiment timeline. Flag missing context.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: assess_validity
+        instructions: |
+          Assess whether the design and data support a causal claim.
+
+          Cover:
+          - Randomization or assignment validity
+          - Sample ratio mismatch or exposure contamination
+          - Metric quality and guardrail behavior
+          - Power, uncertainty, confidence intervals, and practical significance
+          - Peeking, multiple testing, segment fishing, and novelty effects
+          - Sensitivity checks and alternative explanations
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          experiment_readout: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Verify the readout gives a clear ship/iterate/stop recommendation with confidence, caveats, and next validation steps. Do not allow causal overclaiming.
+        inputs:
+          analysis_goal: { required: true }
+          experiment_readout: { required: true }
+        outputs:
+          completion_summary: { required: true }
+
+  insight_brief:
+    summary: Synthesize mixed evidence into a concise business recommendation.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      An insight brief is decision-ready, not a data dump. Lead with the answer, confidence, evidence, tradeoffs, risks, and next action.
+    steps:
+      - name: scope_decision
+        instructions: |
+          Identify the decision, stakeholders, deadline, available evidence, constraints, and alternatives under consideration.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: write_brief
+        instructions: |
+          Write a concise insight brief with:
+          - Recommendation and confidence
+          - Evidence summary
+          - Customer, market, revenue, cost, risk, and sequencing implications as relevant
+          - Options considered and tradeoffs
+          - Caveats and open questions
+          - Next actions with owners where known
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          insight_brief: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Confirm the brief is actionable, evidence-backed, caveated, and aligned to the stated decision. Summarize any remaining gaps.
+        inputs:
+          analysis_goal: { required: true }
+          insight_brief: { required: true }
+        outputs:
+          completion_summary: { required: true }
+
+  executive_report:
+    summary: Create a leadership-ready analytical report with recommendations, risks, and next actions.
+    common_job_info_provided_to_all_steps_at_runtime: |
+      Executive reports must be concise, structured, and decisive. They should make evidence and uncertainty visible while giving leadership a clear path forward.
+    steps:
+      - name: gather_evidence
+        instructions: |
+          Inventory the evidence and define the report objective, audience, decision, timeline, and required level of detail.
+        inputs:
+          analysis_goal: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          analysis_plan: { required: true }
+
+      - name: write_report
+        instructions: |
+          Produce an executive report with:
+          - One-page summary
+          - Key findings and confidence
+          - Evidence and method notes
+          - Business implications
+          - Risks, limitations, and dissenting evidence
+          - Recommended action plan and validation checkpoints
+        inputs:
+          analysis_plan: { required: true }
+          available_evidence: { required: false }
+        outputs:
+          executive_report: { required: true }
+
+      - name: verify_completes_request
+        instructions: |
+          Verify the report is leadership-ready: concise, evidence-backed, clear about confidence, and explicit about actions and risks.
+        inputs:
+          analysis_goal: { required: true }
+          executive_report: { required: true }
+        outputs:
+          completion_summary: { required: true }

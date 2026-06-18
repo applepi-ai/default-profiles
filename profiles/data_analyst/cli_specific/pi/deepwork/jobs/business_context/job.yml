@@ -1,0 +1,388 @@
+name: business_context
+summary: "Learn about a business and maintain structured context for data analysis"
+
+step_arguments:
+  - name: business_website_url
+    description: "The URL of the business's website (e.g., https://www.acme.com)"
+    type: string
+
+  - name: focus_area
+    description: "Optional: a specific division, department, or product line that analysis will focus on. Leave blank if analyzing the whole business."
+    type: string
+
+  - name: business_context/README.md
+    description: "Core business description: what the company does, products, markets, structure"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read business_context/README.md and any sub-directory READMEs that were created.
+        Read .deepwork/tmp/research_business_summary.md to understand what was covered.
+
+        Verify that:
+        - The README reflects verifiable facts about the business, not speculation or hallucination.
+        - The business_context/ directory follows the file structure conventions (README.md at root, division/department subdirectories as appropriate).
+        - If a focus area was specified, there is proportionally more detail on that area.
+        - Key facts are attributed to the business website or other identifiable sources.
+
+  - name: context_files
+    description: "Additional context files under business_context/ (division READMEs, department READMEs, etc.)"
+    type: file_path
+
+  - name: research_summary
+    description: "Summary of what was researched, what files were created, and any gaps or areas needing more information"
+    type: string
+
+  - name: business_context/overview.md
+    description: "Concise business overview (~500 tokens core + ~500 tokens references) synthesized from all business_context/ files"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read business_context/overview.md and compare against the source files in business_context/.
+        Check that the overview is concise and the references point to real files.
+
+        Verify that:
+        - The core overview section is under ~500 tokens (roughly 375 words), focusing on what matters most for data analysis.
+        - The file references point to files that actually exist in business_context/.
+        - The overview covers the key aspects: what the business does, its structure, and the analysis focus area.
+        - Someone starting a data analysis project would find this overview sufficient to understand the business context.
+
+workflows:
+  learn_about_business:
+    summary: "Research a business from its website and build structured context documentation"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      A workflow for building and maintaining business context documentation. Understanding
+      the business is a prerequisite for meaningful data analysis — this job captures that
+      understanding in a structured, reusable format.
+
+      The learn_about_business workflow handles initial research:
+      1. Gathers the business website URL and any focus area from the user
+      2. Uses an Explore sub-agent to research the business and populate the
+         business_context/ directory structure (README, divisions, departments)
+      3. Synthesizes findings into a concise overview file
+
+      The update_business_overview workflow can be run standalone to refresh the
+      business_context/overview.md file from existing context files — useful after
+      new information has been added manually or through other workflows.
+
+      All outputs follow the file structure conventions in doc/system_prompt_experimentation/file_structure.md:
+      - Business context goes in business_context/
+      - Overview lives at business_context/overview.md
+    steps:
+      - name: research_business
+        instructions: |
+          # Research the Business
+
+          ## Objective
+
+          Gather key information about a business from its website and populate the `business_context/` directory with structured documentation that provides context for data analysis.
+
+          ## Task
+
+          Build a comprehensive understanding of the business by researching its website, then organize that understanding into the standard `business_context/` directory structure. This is the foundation for all subsequent analysis work.
+
+          ### Process
+
+          1. **Gather inputs from the user**
+
+             Ask structured questions using the AskUserQuestion tool to collect the required information:
+
+             - **Business website URL**: "What is the URL of the business's website?" (e.g., `https://www.acme.com`)
+             - **Focus area**: "Is there a specific division, department, or product line that your analysis will focus on? If not, I'll document the business broadly."
+
+             Wait for answers before proceeding. If the user's answers are ambiguous or incomplete, ask structured questions to clarify before moving on.
+
+          2. **Research the business using an Explore sub-agent**
+
+             Launch a Task tool with `subagent_type: Explore` to research the business. The sub-agent prompt should include:
+
+             - The business website URL to start from
+             - The focus area (if any)
+             - Instructions to gather: what the company does, main products/services, key markets, organizational structure (divisions, departments), and any details about the focus area
+             - The file structure conventions below (passed inline, not as a file reference)
+
+             **File structure conventions for `business_context/`:**
+
+             ```
+             business_context/
+             ├── README.md                          — Overview of the business itself. Should include:
+             │                                        what the company does, main products, main markets, etc.
+             ├── divisions/
+             │   └── [division_name]/
+             │       └── README.md                  — Description of the division. Optional if not dealing
+             │                                        with divisions. Additional files (e.g., org_chart.md)
+             │                                        can go in the division_name folder.
+             └── departments/
+                 └── [department_name]/
+                     └── README.md                  — For departments, product lines, or similar groupings.
+                                                      Same structure as divisions.
+             ```
+
+             The sub-agent should use `WebFetch` and `WebSearch` to gather information from the business website and other public sources. **Note**: Explore agents cannot write files — they return their findings as text. You will use the sub-agent's output to create the files in the next substep.
+
+          3. **Create the directory structure and files**
+
+             Using the findings returned by the Explore sub-agent, create:
+
+             - `business_context/README.md` — The core business description. This should be substantive (500-1000 words) covering:
+               - What the company does
+               - Main products and services
+               - Key markets and customers
+               - Organizational structure (high-level)
+               - Any relevant history or scale (revenue, employees, locations)
+               - The analysis focus area context (if specified)
+
+             - Division READMEs (if applicable): `business_context/divisions/[name]/README.md`
+             - Department READMEs (if applicable): `business_context/departments/[name]/README.md`
+
+             If a focus area was specified, create more detailed documentation for that area and lighter documentation for the rest.
+
+          4. **Write the research summary**
+
+             Prepare a summary documenting:
+             - What sources were consulted
+             - What files were created
+             - Key facts gathered
+             - Any gaps or areas where information was limited
+             - Recommendations for what to research further
+
+          ## Output Format
+
+          ### business_context/README.md
+
+          ```markdown
+          # [Business Name]
+
+          ## What the Company Does
+          [Core description of the business]
+
+          ## Products and Services
+          [Main product lines and services]
+
+          ## Markets and Customers
+          [Key markets, customer segments, geographic presence]
+
+          ## Organizational Structure
+          [Divisions, departments, and how the company is organized]
+
+          ## Scale
+          [Revenue, employees, locations — whatever is publicly known]
+
+          ## Analysis Focus
+          [If a focus area was specified, describe it and why it matters in context]
+          ```
+
+          ## Context
+
+          This is the first step in understanding a business for data analysis. The context gathered here will be referenced throughout the analysis lifecycle — when writing queries, interpreting results, building reports, and communicating findings. Accuracy and structure matter more than exhaustiveness. It's better to have a smaller set of verified facts than a large set of unverified claims.
+        inputs:
+          business_website_url:
+            required: true
+          focus_area:
+            required: false
+        outputs:
+          business_context/README.md:
+            required: true
+          context_files:
+            required: false
+          research_summary:
+            required: true
+        process_requirements:
+          "Structure Compliance": "The business_context/ directory MUST follow the file structure conventions (README.md at root, division/department subdirectories as appropriate)."
+          "Source Attribution": "Key facts MUST be attributed to the business website or other identifiable sources."
+
+      - name: write_overview
+        instructions: |
+          # Write Business Overview
+
+          ## Objective
+
+          Synthesize all existing `business_context/` files into a concise `business_context/overview.md` that serves as a quick-reference document for anyone starting data analysis work.
+
+          ## Task
+
+          Read through all files in the `business_context/` directory and produce a focused overview document. The overview has two sections: a core summary (~500 tokens max) and a reference section (~500 tokens max) that points to detailed files.
+
+          ### Process
+
+          1. **Inventory existing context files**
+
+             Read all files in the `business_context/` directory tree:
+             - `business_context/README.md`
+             - Any files in `business_context/divisions/*/`
+             - Any files in `business_context/departments/*/`
+             - Any other files that exist in the directory
+
+             Build a mental model of what information is available and where.
+
+             **Edge case**: If `business_context/` doesn't exist or has no files, stop and inform the user that they need to run the `learn_about_business` workflow first (or manually create business context files) before an overview can be generated.
+
+          2. **Write the core overview**
+
+             Create the core overview section of `business_context/overview.md`. This section must be **under 500 tokens** (~375 words). It should answer:
+
+             - What does this business do? (1-2 sentences)
+             - What are the main products/services? (brief list or sentence)
+             - Who are the key customers/markets?
+             - How is the business organized? (just the high-level structure)
+             - What is the analysis focus area? (if one was defined)
+
+             Write in a factual, dense style. Every sentence should carry information. No filler, no preamble, no "This document provides..."
+
+          3. **Write the references section**
+
+             Below the core overview, add a references section (**up to ~500 tokens**) that maps topics to specific files. Format:
+
+             ```markdown
+             ## Detailed References
+
+             | Topic | File | Key Details |
+             |-------|------|-------------|
+             | [topic] | `[relative path]` | [1-sentence summary of what's in the file] |
+             ```
+
+             Only reference files that actually exist. Each row should help someone decide whether they need to read the detailed file.
+
+          4. **Validate file references**
+
+             Before finishing, verify that every file path referenced in the overview actually exists. Remove any references to files that don't exist.
+
+          ## Output Format
+
+          ### business_context/overview.md
+
+          ```markdown
+          # [Business Name] — Overview
+
+          [Core overview paragraph(s). Under 500 tokens. Dense, factual, no filler.]
+
+          ## Analysis Focus
+
+          [If applicable: what specific part of the business is the focus, and why it matters for data analysis. Omit this section if no focus area was defined.]
+
+          ## Detailed References
+
+          | Topic | File | Key Details |
+          |-------|------|-------------|
+          | Company overview | `business_context/README.md` | [summary] |
+          | [Division name] | `business_context/divisions/[name]/README.md` | [summary] |
+          | [Department name] | `business_context/departments/[name]/README.md` | [summary] |
+          ```
+
+          ## Context
+
+          The overview serves as the entry point for anyone working with this business's data. Analysts, engineers, and stakeholders should be able to read this single file and understand enough business context to begin working. The references section lets them drill into specific areas without having to search the directory structure. Keep it short and useful — this file will be read far more often than it's written.
+        inputs:
+          business_context/README.md:
+            required: true
+          context_files:
+            required: false
+        outputs:
+          business_context/overview.md:
+            required: true
+
+  update_business_overview:
+    summary: "Synthesize existing business context files into a concise overview document"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      A workflow for building and maintaining business context documentation. Understanding
+      the business is a prerequisite for meaningful data analysis — this job captures that
+      understanding in a structured, reusable format.
+
+      The update_business_overview workflow refreshes the business_context/overview.md file
+      from existing context files — useful after new information has been added manually or
+      through other workflows.
+
+      All outputs follow the file structure conventions in doc/system_prompt_experimentation/file_structure.md:
+      - Business context goes in business_context/
+      - Overview lives at business_context/overview.md
+    steps:
+      - name: write_overview
+        instructions: |
+          # Write Business Overview
+
+          ## Objective
+
+          Synthesize all existing `business_context/` files into a concise `business_context/overview.md` that serves as a quick-reference document for anyone starting data analysis work.
+
+          ## Task
+
+          Read through all files in the `business_context/` directory and produce a focused overview document. The overview has two sections: a core summary (~500 tokens max) and a reference section (~500 tokens max) that points to detailed files.
+
+          ### Process
+
+          1. **Inventory existing context files**
+
+             Read all files in the `business_context/` directory tree:
+             - `business_context/README.md`
+             - Any files in `business_context/divisions/*/`
+             - Any files in `business_context/departments/*/`
+             - Any other files that exist in the directory
+
+             Build a mental model of what information is available and where.
+
+             **Edge case**: If `business_context/` doesn't exist or has no files, stop and inform the user that they need to run the `learn_about_business` workflow first (or manually create business context files) before an overview can be generated.
+
+          2. **Write the core overview**
+
+             Create the core overview section of `business_context/overview.md`. This section must be **under 500 tokens** (~375 words). It should answer:
+
+             - What does this business do? (1-2 sentences)
+             - What are the main products/services? (brief list or sentence)
+             - Who are the key customers/markets?
+             - How is the business organized? (just the high-level structure)
+             - What is the analysis focus area? (if one was defined)
+
+             Write in a factual, dense style. Every sentence should carry information. No filler, no preamble, no "This document provides..."
+
+          3. **Write the references section**
+
+             Below the core overview, add a references section (**up to ~500 tokens**) that maps topics to specific files. Format:
+
+             ```markdown
+             ## Detailed References
+
+             | Topic | File | Key Details |
+             |-------|------|-------------|
+             | [topic] | `[relative path]` | [1-sentence summary of what's in the file] |
+             ```
+
+             Only reference files that actually exist. Each row should help someone decide whether they need to read the detailed file.
+
+          4. **Validate file references**
+
+             Before finishing, verify that every file path referenced in the overview actually exists. Remove any references to files that don't exist.
+
+          ## Output Format
+
+          ### business_context/overview.md
+
+          ```markdown
+          # [Business Name] — Overview
+
+          [Core overview paragraph(s). Under 500 tokens. Dense, factual, no filler.]
+
+          ## Analysis Focus
+
+          [If applicable: what specific part of the business is the focus, and why it matters for data analysis. Omit this section if no focus area was defined.]
+
+          ## Detailed References
+
+          | Topic | File | Key Details |
+          |-------|------|-------------|
+          | Company overview | `business_context/README.md` | [summary] |
+          | [Division name] | `business_context/divisions/[name]/README.md` | [summary] |
+          | [Department name] | `business_context/departments/[name]/README.md` | [summary] |
+          ```
+
+          ## Context
+
+          The overview serves as the entry point for anyone working with this business's data. Analysts, engineers, and stakeholders should be able to read this single file and understand enough business context to begin working. The references section lets them drill into specific areas without having to search the directory structure. Keep it short and useful — this file will be read far more often than it's written.
+        inputs:
+          business_context/README.md:
+            required: true
+          context_files:
+            required: false
+        outputs:
+          business_context/overview.md:
+            required: true

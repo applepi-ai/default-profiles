@@ -1,0 +1,1445 @@
+# yaml-language-server: $schema=.deepwork/schemas/job.schema.json
+name: analysis
+summary: "Data analysis workflows for writing queries, answering ad-hoc questions, and producing research reports"
+
+step_arguments:
+  - name: datasource
+    description: "The datasource to write queries for (e.g., 'databricks_telco')"
+    type: string
+
+  - name: analysis_goal
+    description: "What the queries should accomplish — the analysis questions to answer"
+    type: string
+
+  - name: output_location
+    description: "Where to place the query files (e.g., 'queries/adhoc' or 'docs/reports/[topic]/[report]/[instance]/queries')"
+    type: string
+
+  - name: question
+    description: "The ad-hoc data question to answer"
+    type: string
+
+  - name: report_topic
+    description: "What the one-off research report should cover — the high-level topic or question"
+    type: string
+
+  - name: output_path
+    description: "Where to place the report — for ad-hoc reports use 'docs/reports/adhoc/[topic_area]' (e.g., 'docs/reports/adhoc/cloud_costs')"
+    type: string
+
+  - name: report_description
+    description: "Description of the regular report the user wants to define — what it covers, who it's for, and how often it runs"
+    type: string
+
+  - name: query_files
+    description: "Query .md files created, executed, or used during analysis"
+    type: file_path
+    review:
+      strategy: individual
+      instructions: |
+        Read all files listed in the `applicable_reference_files` frontmatter of the query being reviewed.
+        These provide table schemas and context needed to evaluate the query accurately.
+
+        Quality criteria:
+        - "Description Accuracy": The `description` frontmatter accurately describes what the SQL query does. Nuances are called out that could be confusing if omitted.
+        - "Output Clarity": The column names in the SELECT clause are descriptive and accurate. Someone reading just the column headers can understand what each value represents.
+        - "Query Structure": The SQL uses correct table and column names as documented in the reference files. Joins are on the correct keys. A LIMIT clause is present.
+
+  - name: presentation_notes
+    description: ".deepwork/tmp/presentation_notes.md — brief notes on what was communicated to the user and any follow-up suggestions offered"
+    type: file_path
+
+  - name: prep_validation
+    description: ".deepwork/tmp/prep_validation.md — validation results confirming tools work, directories created, and datasources identified"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Quality criteria:
+        - "Tools Validated": At least one datasource query tool has been tested with a trivial query to confirm connectivity. Any failures are noted.
+        - "Directory Structure": The output directory has been created with the expected structure (report dir with queries subdir).
+
+  - name: scope_document
+    description: ".deepwork/tmp/scope_document.md — agreed research questions, datasources to use, key definitions, exclusions, and success criteria"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Quality criteria:
+        - "Clear Research Questions": The scope document lists specific, answerable research questions (not vague topics). Another analyst could pick this up and know exactly what to investigate.
+        - "Datasource Mapping": Each research question is mapped to specific datasources and tables. No questions are left without a clear data path.
+        - "Success Criteria": The document defines what 'done' looks like — what depth of analysis is expected and what the deliverable should contain.
+
+  - name: draft_report
+    description: ".deepwork/tmp/draft_report.md — the evolving draft report with findings, analysis, and citations to query files"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read the scope_document from the scope_analysis step to understand the agreed research questions.
+        Read the qa_tracker to verify all research questions have been addressed.
+        Read the finder_report from the finder_analysis step to verify finder patterns were incorporated into the analysis.
+        Spot-check a few query files referenced as citations to verify they contain supporting data.
+
+        Quality criteria:
+        - "Research Question Coverage": All research questions from the scope document are addressed in the draft. No major questions are left unanswered.
+        - "Draft Coherence": The draft tells a logical story. Sections are connected rather than isolated findings. The narrative builds progressively.
+        - "Analysis Depth": The analysis has gone deep enough on important threads. No obvious follow-up questions are left unasked (e.g., 'why?' or 'what drives that?').
+        - "Citation Integrity": Claims in the draft are backed by specific query file references. The referenced query files contain data supporting those claims.
+
+  - name: qa_tracker
+    description: ".deepwork/tmp/qa_tracker.md — running log of research questions asked, answers found, and follow-up questions generated"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Quality criteria:
+        - "Q&A Completeness": All questions are answered or explicitly marked as out-of-scope. No dangling questions remain that should have been investigated.
+
+  - name: finder_report
+    description: "Finder analysis draft report at finder/{stem}/finder_analysis_report.md"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Quality criteria:
+        - "Relevant KPI": The KPI chosen for finder analysis is relevant to the report's research questions and aligns with the scope document.
+        - "Results Incorporated": The finder report contains meaningful patterns. If zero patterns were found, the step should have adjusted the configuration and re-run.
+
+  - name: final_report
+    description: "The polished final report in its target format (Report, Presentation, or Raw Markdown)"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read the draft_report from the analyze_data step to verify no content was lost or distorted during polishing.
+        Read the finder_report from the finder_analysis step to verify finder patterns were incorporated.
+        Spot-check cited data points against the query files to confirm accuracy.
+
+        Quality criteria:
+        - "Content Accuracy": All claims from the draft are preserved accurately. Cited numbers match the source query data. There are no hallucinated or unsupported statements.
+        - "Audience Fit": The language, detail level, and framing are appropriate for the intended audience. An executive summary or key takeaways section is present.
+        - "Formatting Quality": The document layout is clean and professional. The format_report workflow produced a well-structured deliverable with no rendering issues.
+        - "Narrative Flow": The document reads well from start to finish. Transitions are smooth between sections. The conclusion is actionable.
+
+  - name: feedback_notes
+    description: ".deepwork/tmp/feedback_notes.md — notes on user feedback received and any changes made"
+    type: file_path
+
+  - name: report_specification
+    description: "report_specification.md at the report-type folder level — progressive specification of the report's domain, metrics, structure, and quality expectations"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Quality criteria:
+        - "Relevant Metrics Identified": The specification's Research & Domain Norms and Metrics & KPIs sections identify the standard metrics and KPIs used in this type of reporting. Industry benchmarks are mentioned where applicable.
+        - "Actionable for Workflow Design": The findings are specific enough to inform workflow step design — e.g., what data to gather, what analyses to run, what sections to include in the report.
+        - "Sources Cited": The findings are grounded in specific sources rather than generic assertions. The Sources section of the specification contains cited references.
+
+  - name: workflow_job_yml
+    description: "The job.yml file containing the new report workflow (either updated existing job or new job)"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read `research_report_job_best_practices.md` in the analysis job directory.
+        Read the `ad_hoc_research_report` workflow section in the analysis job's job.yml as a reference for well-structured report workflows.
+        Read the report_specification from the research_the_area step to verify the workflow incorporates domain-specific norms (metrics, analyses, report structure, benchmarks).
+
+        Quality criteria:
+        - "Best Practices Followed": The workflow follows the five-phase pattern from research_report_job_best_practices.md (Prepare, Align (optional), Analyze, Present, Feedback) where applicable. Reviews are defined for critical steps.
+        - "Domain Norms Incorporated": The workflow incorporates the metrics, frameworks, and reporting norms identified in the research step. Standard KPIs and analyses are reflected in the step descriptions.
+        - "Sub-Agent Query Pattern": The step instructions for query-writing steps direct the agent to use a Task tool sub-agent with the `analysis/write_queries` sub-workflow. The instructions say to `resume` the same sub-agent for subsequent query batches rather than starting a new one each time.
+        - "Report Opening": The last step's instructions include a directive to open the final report file for the user using `open` (macOS) or `xdg-open` (Linux).
+        - "report_specification.md Review in Analysis": The analysis-phase step has a review criterion that directs the reviewer to read the report_specification.md (from the parent report-type directory) and verify the content requirements are satisfied. The criterion clarifies that only content requirements (metrics, segments, analyses) apply at this stage — presentation requirements are deferred to the present step.
+        - "report_specification.md Review in Presentation": The presentation-phase step has a review criterion that directs the reviewer to read the report_specification.md (from the parent report-type directory) and verify the full specification is satisfied — both content and presentation requirements.
+
+workflows:
+  write_queries:
+    summary: "Write a set of query files for one datasource for an analysis"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      This job handles core data analysis tasks across all datasources.
+
+      ## Key Context Sources
+      - Read `business_context/overview.md` for high-level business overview and context
+      - Read `datasources/[source_name]/key_tables.md` for key tables in each datasource
+      - Explore `datasources/[source_name]/catalog/` for detailed table schemas and metadata
+      - Check `queries/reference/` for vetted example queries that can be reused or adapted
+
+      ## Query File Format and Tools
+      See `utilities/HOW_TO_QUERY.md` for the query file format specification (frontmatter keys,
+      output modes, diagnostic flags) and query tool usage.
+
+      ## Query File Placement
+      - Report queries: place in the appropriate `docs/reports/[topic]/[report]/[instance]/queries/` subdirectory
+      - Ad-hoc queries: place in `queries/adhoc/`
+      - Reference queries in `queries/reference/` should be reused unaltered when appropriate, or adapted as a basis
+
+      ## Important Conventions
+      - Always include a LIMIT on queries based on expected result size to avoid runaway queries
+      - If workarounds were needed in the SQL, add comments explaining them
+      - When unsure about tables or columns, use AskUserQuestion with suggestions based on available data
+      - Any user answers that represent generally useful info should be recorded in the relevant table .md file and datasource README.md
+
+      ## Report File Structure
+      Reports are organized under `docs/reports/`:
+      - Ad-hoc (one-off) reports: `docs/reports/adhoc/[topic_area]/`
+      - Standard reports: `docs/reports/[topic_or_department]/[report_name]/[instance_identifier]/`
+
+      Each report directory contains everything together:
+      - The final output file (a Report, Presentation, or Raw Markdown file), with a clear identifier name
+      - `queries/` — query files used to generate the report
+      - Any intermediate files (scope document, Q&A tracker, draft report, etc.)
+    steps:
+      - name: write_queries
+        instructions: |
+          # Write Queries
+
+          ## Objective
+
+          Write a set of query files for a specific datasource to answer an analysis goal. Each query file is a self-contained Markdown document with SQL in YAML frontmatter and (after execution) results in the body or an adjacent file.
+
+          ## Task
+
+          Create query `.md` files that answer the analysis questions for the given datasource. Use existing reference queries as templates when applicable, and follow the query file format conventions exactly.
+
+          ### Process
+
+          1. **Understand the datasource**
+             - Read `datasources/[datasource]/key_tables.md` for an overview of key tables
+             - Explore `datasources/[datasource]/catalog/tables/` for detailed table schemas and column descriptions
+             - Note any special conventions, column naming patterns, or known quirks documented in the table files
+
+          2. **Check reference queries**
+             - Read all files in `queries/reference/` for the same datasource
+             - If a reference query answers part of the analysis goal, reuse it unaltered
+             - If a reference query is close but needs modification, use it as a basis for a new query
+
+          3. **Plan the queries**
+             - Break the analysis goal into individual questions, each answerable by one query
+             - For each query, identify the tables and columns needed
+             - If unsure what tables or columns to use, ask structured questions using the AskUserQuestion tool — offer suggestions based on what you found in the catalog, and let the user confirm or correct
+             - If the user provides information that would be generally useful (e.g., business rules for interpreting column values), record it in the relevant table `.md` file and the datasource `README.md`
+
+          4. **Write the query files**
+             - Create each query file at the specified `output_location`
+             - Follow the exact frontmatter format (see Output Format below)
+             - Choose the appropriate `output` type:
+               - `body` — when expected results are small (< ~100 rows) or don't need programmatic use
+               - `csv_file` — for large results or results that need programmatic use
+               - `parquet_file` — for very large results or columnar analysis
+             - Always include a `LIMIT` clause based on expected result size to avoid runaway queries
+             - List all relevant table schema files in `applicable_reference_files`
+             - If you had to work around anything odd (unexpected schema, missing data, ambiguous joins), add SQL comments explaining the workaround
+
+          5. **Validate each query before submitting**
+             - Run the appropriate query tool from `utilities/` with `--validate` on each query file to confirm it parses
+             - Run with `--explain` on each query file to check the execution plan — look for unnecessary full table scans, inefficient join strategies, or missing predicates
+             - Fix any issues found before marking the step as complete
+             - This validation step is critical because the review will not re-run these checks
+
+          ## Output Format
+
+          ### Query files
+
+          See `utilities/HOW_TO_QUERY.md` for the query file format specification.
+
+          **Concrete example** (for a telco datasource):
+
+          ```markdown
+          ---
+          description: >
+            Churn rate by contract type and internet service. Joins the services
+            fact table with churn status. Uses Churn Value (0/1) for rate calc.
+          applicable_reference_files:
+            - datasources/databricks_telco/catalog/tables/telco/telco_customer_churn_services.md
+            - datasources/databricks_telco/catalog/tables/telco/telco_customer_churn_status_v2.md
+          sql: |
+            SELECT
+              s.Contract,
+              s.`Internet Type`,
+              COUNT(*) AS total_customers,
+              SUM(st.`Churn Value`) AS churned_customers,
+              ROUND(100.0 * SUM(st.`Churn Value`) / COUNT(*), 1) AS churn_rate_pct
+            FROM examples.telco.telco_customer_churn_services s
+            JOIN examples.telco.telco_customer_churn_status_v2 st
+              ON s.`Customer ID` = st.`Customer ID`
+            GROUP BY s.Contract, s.`Internet Type`
+            ORDER BY churn_rate_pct DESC
+            LIMIT 50
+          output: body
+          ---
+          ```
+
+          ## Context
+
+          This step is the foundation for all analysis in this job. The query files it produces are the primary artifacts — they contain both the SQL and (after execution) the results. They are designed to be self-documenting: the description explains what the query does, the reference files link to schema context, and the results are right there in the file. Getting the queries right here means downstream steps (running, reviewing, reporting) can focus on interpretation rather than debugging SQL.
+        inputs:
+          datasource:
+            required: true
+          analysis_goal:
+            required: true
+          output_location:
+            required: true
+        outputs:
+          query_files:
+            required: true
+
+  ad_hoc_query:
+    summary: "Answer an ad-hoc data question by writing queries, running them, and presenting results"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      This job handles core data analysis tasks across all datasources.
+
+      ## Key Context Sources
+      - Read `business_context/overview.md` for high-level business overview and context
+      - Read `datasources/[source_name]/key_tables.md` for key tables in each datasource
+      - Explore `datasources/[source_name]/catalog/` for detailed table schemas and metadata
+      - Check `queries/reference/` for vetted example queries that can be reused or adapted
+
+      ## Query File Format and Tools
+      See `utilities/HOW_TO_QUERY.md` for the query file format specification (frontmatter keys,
+      output modes, diagnostic flags) and query tool usage.
+
+      ## Query File Placement
+      - Report queries: place in the appropriate `docs/reports/[topic]/[report]/[instance]/queries/` subdirectory
+      - Ad-hoc queries: place in `queries/adhoc/`
+      - Reference queries in `queries/reference/` should be reused unaltered when appropriate, or adapted as a basis
+
+      ## Important Conventions
+      - Always include a LIMIT on queries based on expected result size to avoid runaway queries
+      - If workarounds were needed in the SQL, add comments explaining them
+      - When unsure about tables or columns, use AskUserQuestion with suggestions based on available data
+      - Any user answers that represent generally useful info should be recorded in the relevant table .md file and datasource README.md
+
+      ## Report File Structure
+      Reports are organized under `docs/reports/`:
+      - Ad-hoc (one-off) reports: `docs/reports/adhoc/[topic_area]/`
+      - Standard reports: `docs/reports/[topic_or_department]/[report_name]/[instance_identifier]/`
+
+      Each report directory contains everything together:
+      - The final output file (a Report, Presentation, or Raw Markdown file), with a clear identifier name
+      - `queries/` — query files used to generate the report
+      - Any intermediate files (scope document, Q&A tracker, draft report, etc.)
+    steps:
+      - name: run_queries
+        instructions: |
+          # Run Queries
+
+          ## Objective
+
+          Answer an ad-hoc data question by identifying the right datasource, writing queries via the `write_queries` sub-workflow, and then executing them to produce results.
+
+          ## Task
+
+          Take the user's ad-hoc question and turn it into executed query files with results. This step orchestrates the full query lifecycle: datasource identification, query authoring (via sub-workflow), and execution.
+
+          ### Process
+
+          1. **Identify the datasource**
+             - Read `datasources/` directory to see available datasources
+             - Read each datasource's `README.md` and `key_tables.md` to understand what data each contains
+             - Match the user's question to the most appropriate datasource
+             - If the question could span multiple datasources, pick the primary one and note limitations
+
+          2. **Launch the `write_queries` sub-workflow**
+             - Start the `write_queries` workflow from the `analysis` job as a nested DeepWork workflow using `start_workflow`:
+               - `job_name`: `analysis`
+               - `workflow_name`: `write_queries`
+               - `goal`: the user's ad-hoc question
+             - The sub-workflow will handle query authoring with its own review cycle (description accuracy, column clarity, --explain validation)
+             - Follow the sub-workflow's steps until it completes
+             - Collect the resulting query files
+
+          3. **Execute the queries**
+             - Identify the appropriate query tool in `utilities/` for the datasource (see `utilities/HOW_TO_QUERY.md` for tool usage)
+             - Run each query file using the tool (normal execution, not --explain or --validate)
+             - Verify each query executed successfully
+
+          4. **Collect outputs**
+             - The output of this step is the set of executed query files (which now contain or reference their results)
+             - Report all query file paths as the `query_files` output
+
+          ## Output Format
+
+          ### query_files
+
+          The same query `.md` files produced by the `write_queries` sub-workflow, now with results populated. For `output: body` queries, the file body will contain CSV data below the closing `---`. For `csv_file`/`parquet_file` queries, an adjacent file will exist.
+
+          No additional output files are needed — the query files themselves are the artifacts.
+
+          ## Context
+
+          This is the first step of the `ad_hoc_query` workflow. It handles the heavy lifting — datasource selection, query authoring, and execution. The next step (`report_ad_hoc_answer`) will read these executed query files and present the results to the user. Getting this step right means the reporting step can focus purely on clear communication rather than data wrangling.
+        inputs:
+          question:
+            required: true
+        outputs:
+          query_files:
+            required: true
+        process_requirements:
+          "Results Plausibility": |
+            Read relevant files in `business_context/` and the datasource directory (especially `key_tables.md`
+            and table schemas in `catalog/`) to understand expected data ranges. Also check `queries/reference/`
+            for the same datasource to compare against known-good query patterns and result magnitudes.
+
+            The query results are reasonable when compared to business context and reference data.
+            Numbers that seem unexpectedly low or high (e.g., 1M total customers but a state-level
+            query yields only 15) are flagged as surprising and reported as needing work. The agent may override
+            this review with an explanation if it has re-checked and believes results are correct,
+            but must flag the surprising values to the user.
+
+      - name: report_ad_hoc_answer
+        instructions: |
+          # Report Ad-Hoc Answer
+
+          ## Objective
+
+          Present the results from executed queries in a clear, concise manner and offer the user follow-up options.
+
+          ## Task
+
+          Read the executed query files from the previous step and communicate the findings to the user. This step is about presentation and communication, not data processing.
+
+          ### Process
+
+          1. **Read the query files and results**
+             - Read each query file from the `run_queries` step (see `utilities/HOW_TO_QUERY.md` for query file format and output modes)
+             - Understand the `description` frontmatter to know what each query answers
+
+          2. **Synthesize the findings**
+             - Connect the query results back to the user's original question
+             - Identify the key takeaways — what are the most important numbers or patterns?
+             - Note any caveats, limitations, or surprising findings
+
+          3. **Call `finished_step` BEFORE presenting to the user**
+             - This is critical: you must call `finished_step` with your outputs before you present the answer in conversation
+             - The `presentation_notes` output is optional — omit it or write a brief note if useful
+
+          4. **Present the answer**
+             - Lead with the direct answer to the user's question
+             - Support with key data points from the queries
+             - Keep it concise — the user can always look at the query files for full details
+             - Format numbers and tables clearly
+
+          5. **Offer follow-ups**
+             - Suggest relevant next steps the user might want, such as:
+               - Creating a chart or visualization from the data
+               - Running a deeper analysis (full analysis workflow)
+               - Exploring a related question
+               - Exporting the data in a different format
+
+          ## Context
+
+          This is the final step of the `ad_hoc_query` workflow. The hard work (query writing, review, execution, plausibility checking) is done — this step is purely about communicating results effectively. The user asked a question and wants a clear answer. The query files with full details are available if they want to dig deeper, so this presentation should focus on the "so what" rather than exhaustive data dumps.
+        inputs:
+          query_files:
+            required: true
+        outputs:
+          presentation_notes:
+            required: false
+
+  ad_hoc_research_report:
+    summary: "Produce a one-off research report: scope the question, analyze data iteratively, and deliver a polished report"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      This job handles core data analysis tasks across all datasources.
+
+      ## Key Context Sources
+      - Read `business_context/overview.md` for high-level business overview and context
+      - Read `datasources/[source_name]/key_tables.md` for key tables in each datasource
+      - Explore `datasources/[source_name]/catalog/` for detailed table schemas and metadata
+      - Check `queries/reference/` for vetted example queries that can be reused or adapted
+
+      ## Query File Format and Tools
+      See `utilities/HOW_TO_QUERY.md` for the query file format specification (frontmatter keys,
+      output modes, diagnostic flags) and query tool usage.
+
+      ## Query File Placement
+      - Report queries: place in the appropriate `docs/reports/[topic]/[report]/[instance]/queries/` subdirectory
+      - Ad-hoc queries: place in `queries/adhoc/`
+      - Reference queries in `queries/reference/` should be reused unaltered when appropriate, or adapted as a basis
+
+      ## Important Conventions
+      - Always include a LIMIT on queries based on expected result size to avoid runaway queries
+      - If workarounds were needed in the SQL, add comments explaining them
+      - When unsure about tables or columns, use AskUserQuestion with suggestions based on available data
+      - Any user answers that represent generally useful info should be recorded in the relevant table .md file and datasource README.md
+
+      ## Report File Structure
+      Reports are organized under `docs/reports/`:
+      - Ad-hoc (one-off) reports: `docs/reports/adhoc/[topic_area]/`
+      - Standard reports: `docs/reports/[topic_or_department]/[report_name]/[instance_identifier]/`
+
+      Each report directory contains everything together:
+      - The final output file (a Report, Presentation, or Raw Markdown file), with a clear identifier name
+      - `queries/` — query files used to generate the report
+      - Any intermediate files (scope document, Q&A tracker, draft report, etc.)
+    steps:
+      - name: prepare_report
+        instructions: |
+          # Prepare Report
+
+          ## Objective
+
+          Validate that all required tools and datasources are accessible, create the report's output directory structure, and confirm prerequisites before any analysis work begins. This is for one-off research reports that go in `docs/reports/adhoc/`.
+
+          ## Task
+
+          This is a lightweight validation step that ensures the environment is ready for a one-off research report. It prevents wasting time on analysis only to discover a broken tool or missing datasource midway through.
+
+          ### Process
+
+          1. **Identify relevant datasources**
+             - Read the `datasources/` directory to see what datasources are available
+             - Read each datasource's `README.md` to understand what data each contains
+             - Determine which datasource(s) are most likely needed for the report topic
+             - If the topic is ambiguous or could span multiple datasources, note all candidates
+
+          2. **Validate datasource tools**
+             - For each candidate datasource, find the corresponding query tool in `utilities/`
+             - Run the tool with `--validate` on a trivial query (e.g., `SELECT 1`) to confirm connectivity
+             - Record which tools work and which fail
+             - If a critical tool fails, ask the user to resolve the issue before proceeding
+
+          3. **Create the output directory structure**
+             - Create the report directory at the specified `output_path` (typically `docs/reports/adhoc/[topic_area]/`)
+             - Create a `queries/` subdirectory for query files
+             - All intermediate files (scope document, Q&A tracker, draft) go in the report directory alongside the final report
+             - Example structure for `output_path = docs/reports/adhoc/cloud_costs`:
+               ```
+               docs/reports/adhoc/cloud_costs/
+                 queries/
+               ```
+
+          4. **Record validation results**
+             - Write the `prep_validation` output file in the report directory
+             - Include: datasources identified, tools tested (pass/fail), directory structure created, any issues found
+
+          ## Output Format
+
+          ### prep_validation
+
+          A markdown file recording the validation results. Place it in the report directory.
+
+          **Structure**:
+          ```markdown
+          # Report Preparation: [Report Topic]
+
+          ## Output Path
+          - **Report directory**: [output_path]
+          - **Queries**: [output_path]/queries/
+
+          ## Datasources Identified
+          | Datasource | Relevance | Query Tool | Status |
+          |---|---|---|---|
+          | [datasource_name] | [why relevant to topic] | [tool path] | [pass/fail] |
+
+          ## Issues
+          - [Any issues found, or "None — all prerequisites validated"]
+
+          ## Ready to Proceed
+          [Yes/No — and explanation if No]
+          ```
+
+          **Concrete example**:
+          ```markdown
+          # Report Preparation: AWS Cloud Spend Analysis
+
+          ## Output Path
+          - **Report directory**: docs/reports/adhoc/aws_spend/
+          - **Queries**: docs/reports/adhoc/aws_spend/queries/
+
+          ## Datasources Identified
+          | Datasource | Relevance | Query Tool | Status |
+          |---|---|---|---|
+          | databricks_billing | Contains AWS cost and usage data | utilities/databricks_query.py | pass |
+          | snowflake_finance | Has budget allocations by department | utilities/snowflake_query.py | pass |
+
+          ## Issues
+          - None — all prerequisites validated
+
+          ## Ready to Proceed
+          Yes — both datasources are accessible and output directories are created.
+          ```
+
+          ## Context
+
+          This is the first step of the `ad_hoc_research_report` workflow. It follows the "Prepare" phase from the research report best practices: validate prerequisites before doing real work. Catching broken tools or missing datasources here saves significant time compared to discovering them mid-analysis. The directory structure created here will be used by all subsequent steps.
+        inputs:
+          report_topic:
+            required: true
+          output_path:
+            required: true
+        outputs:
+          prep_validation:
+            required: true
+
+      - name: scope_analysis
+        instructions: |
+          # Scope Analysis
+
+          ## Objective
+
+          Build enough understanding of the available data and the user's intent to scope the research report correctly. Produce a scoping document that both the agent and user agree on.
+
+          ## Task
+
+          This is a cyclical step: perform light research on the data, then ask the user clarifying questions, then refine understanding, and repeat until there is shared agreement on what the report should cover and what "done" looks like.
+
+          ### Process
+
+          1. **Light grounding research**
+             - Read the `prep_validation` file from the prepare step to know which datasources are available
+             - Read `key_tables.md` for each relevant datasource to understand what data exists
+             - Run a few broad exploratory queries to understand the data landscape:
+               - Total record counts, date ranges, key dimensions
+               - Column cardinality for likely segmentation columns (e.g., region, department, product)
+             - Use the `write_queries` workflow in sub-agents (via the Task tool) for generating batches of exploratory queries. Place these in the report's `queries/` directory.
+             - Run the resulting query files using the appropriate datasource query tools — run them in parallel batches
+
+          2. **Clarify scope with the user**
+             - You MUST use the AskUserQuestion tool to ask scope questions — do NOT ask questions as plain chat text. Present each clarification as a structured AskUserQuestion with concrete options derived from the data.
+             - Surface ambiguities and propose scope boundaries
+             - Key things to clarify:
+               - Which specific questions should the report answer?
+               - What time period should the analysis cover?
+               - Are there segments, divisions, or filters to focus on?
+               - Who is the audience for the report? (executives, analysts, engineers)
+               - What level of depth is expected?
+               - Are there specific metrics or KPIs that matter?
+               - What format should the final report be in? (Report, Presentation, or Raw Markdown)
+             - Ground your questions with data: "I see 45,000 customer records across 3 divisions. Should we scope to a particular division?"
+
+          3. **Iterate until aligned**
+             - If the user's answers raise new questions or reveal complexity, ask follow-up questions
+             - If answers reveal generally useful information about the data (business rules, column interpretations), record them in the relevant table `.md` files and datasource `README.md`
+             - Continue the cycle until both parties agree on the scope
+
+          4. **Produce the scoping document**
+             - Write the `scope_document` output file in the report directory
+             - This document becomes the north star for the analyze step — it should be specific enough that another analyst could pick it up and know exactly what to investigate
+
+          ## Output Format
+
+          ### scope_document
+
+          A markdown file capturing the agreed research scope. Place it in the report directory (e.g., `docs/reports/adhoc/[topic_area]/scope_document.md`).
+
+          **Structure**:
+          ```markdown
+          # Report Scope: [Report Topic]
+
+          ## Audience
+          [Who will read this report and what they need from it]
+
+          ## Research Questions
+          1. [Specific, answerable question]
+             - **Datasource**: [which datasource and tables]
+             - **Expected approach**: [brief description of how to answer]
+          2. [Another question]
+             - **Datasource**: [...]
+             - **Expected approach**: [...]
+
+          ## Key Definitions
+          - **[Term]**: [Definition agreed with user — e.g., "churn = no activity in 90 days"]
+
+          ## Scope Boundaries
+          - **Included**: [What's in scope — time period, segments, etc.]
+          - **Excluded**: [What's explicitly out of scope]
+
+          ## Success Criteria
+          - [What the final report must contain to be considered complete]
+          - [Expected depth of analysis]
+          - [Output format: Report / Presentation / Raw Markdown]
+
+          ## Data Landscape Summary
+          [Brief summary of what the exploratory queries revealed — record counts, date ranges, key dimensions. This gives the analyze step a head start.]
+          ```
+
+          ## Context
+
+          This is the "Align" phase of the research report workflow. Getting the scope right here prevents the analyze step from going in the wrong direction. The scoping document serves as a contract between the agent and the user — it's what the analyze step will be evaluated against. Time spent here clarifying saves time later by avoiding rework.
+        inputs:
+          prep_validation:
+            required: true
+        outputs:
+          scope_document:
+            required: true
+
+      - name: finder_analysis
+        instructions: |
+          # Run Finder Analysis
+
+          ## Objective
+
+          Discover statistically significant patterns early in the research workflow by running the `finder_analysis` job as a sub-workflow. Identify the primary datasource and a relevant KPI from the scope document, then execute the finder pipeline to produce a draft finder report that will inform the subsequent analysis.
+
+          ## Task
+
+          Use the scope document to determine which datasource and KPI to analyze, then invoke the `finder_analysis/run_finder` sub-workflow to discover patterns in the data. The finder results will be available to the analyze_data step that follows.
+
+          ### Process
+
+          1. **Determine the datasource and KPI**
+             - Read the `scope_document` from the scope_analysis step to identify the primary datasource, research questions, and key metrics
+             - Select the primary datasource — this should be the datasource mapped to the main research questions in the scope document
+             - Select the most relevant KPI for finder analysis:
+               - It should be a key outcome metric central to the report's research questions
+               - It must be a numeric or boolean column suitable for pattern discovery
+               - Prefer the metric that the user and scope document identify as the primary outcome of interest
+             - If there are multiple plausible KPIs, choose the one most aligned with the scope document's primary research question
+
+          2. **Launch the `run_finder` sub-workflow**
+             - Start the `run_finder` workflow from the `finder_analysis` job as a nested DeepWork workflow using `start_workflow`:
+               - `job_name`: `finder_analysis`
+               - `workflow_name`: `run_finder`
+               - `goal`: a clear description derived from the scope document — e.g., "Discover statistically significant patterns that drive [KPI] for [topic], using the [datasource] datasource"
+             - The sub-workflow will walk through its own steps: `data_export`, `column_configuration`, `config_and_run`, `draft_report`
+             - Follow the sub-workflow's steps until it completes
+
+          3. **Collect the finder report**
+             - The sub-workflow's `draft_report` step produces a finder analysis report at `finder/{stem}/finder_analysis_report.md`
+             - Report this file path as the `finder_report` output
+
+          ### Handling zero patterns
+
+          If the finder discovers zero patterns, this likely indicates a configuration issue (too many excluded columns, wrong KPI, insufficient data). Before accepting zero results:
+          - Review the decisions file to check if important columns were excluded
+          - Consider adjusting the KPI or re-running with different column selections
+          - Only accept zero patterns if you have verified the configuration is reasonable and the data genuinely has no significant patterns for this KPI
+
+          ## Output Format
+
+          ### finder_report
+
+          The draft markdown report produced by the `finder_analysis/run_finder` sub-workflow at `finder/{stem}/finder_analysis_report.md`. This contains:
+          - Run overview (dataset size, KPI, configuration summary)
+          - Top patterns table with statistical significance metrics
+          - Analytical narrative highlighting the most notable findings
+
+          This report will be used by the analyze_data step to inform the analysis and incorporated into the final report during the present_report step.
+
+          ## Context
+
+          This step runs before `analyze_data` in the `ad_hoc_research_report` workflow, immediately after scoping. Running the finder early means its statistically significant patterns are available to guide and enrich the subsequent manual analysis — the analyst can investigate finder-surfaced segments, validate them with targeted queries, and weave the patterns into the narrative. The `present_report` step will integrate these findings into the final report.
+        inputs:
+          scope_document:
+            required: true
+        outputs:
+          finder_report:
+            required: true
+
+      - name: analyze_data
+        instructions: |
+          # Analyze Data
+
+          ## Objective
+
+          Execute the core research cycle: write and run queries in iterative batches, track questions and answers, and progressively build a draft report with citations back to the query data.
+
+          ## Task
+
+          This is the most substantial step in the workflow. Read the scoping document and the finder report from the preceding step, then iterate through layers of analysis — each layer deepening understanding. Use the finder's statistically significant patterns to guide investigation and enrich the narrative. Maintain three working files throughout: query files, a Q&A tracker, and an evolving draft report.
+
+          ### Process
+
+          1. **Set up working files**
+             - Read the `scope_document` to understand the research questions
+             - Read the `finder_report` from the run_finder_analysis step to understand which patterns the finder discovered — these are statistically significant subgroup patterns that should inform your analysis
+             - Initialize the `qa_tracker` in the report directory with all research questions from the scope document
+             - Initialize the `draft_report` in the report directory with a skeleton based on the research questions
+             - All query files go in the report's `queries/` directory
+
+          2. **Layer 1: Top-level facts**
+             - For each research question, write and run queries to get the top-level answer
+             - **Use a sub-agent to write queries via the `write_queries` workflow:**
+               - Launch a Task sub-agent with instructions to call `start_workflow` with `job_name: analysis`, `workflow_name: write_queries`, and a `goal` describing the research question(s) for this batch
+               - The sub-agent follows the write_queries workflow through its steps and quality reviews, then returns the resulting query file paths
+               - You may batch multiple related questions into one sub-agent invocation, or run them separately — use judgment based on how related the questions are
+             - After the sub-agent returns, execute the resulting query files using the appropriate query tools (run them in parallel batches)
+             - Record answers in the Q&A tracker
+             - Update the draft report with initial findings
+
+          3. **Layer 2+: Iterative deepening**
+             - Review the answers from the previous layer
+             - For each key finding, ask "why?" or "what drives that?" — generate follow-up questions
+             - Add these to the Q&A tracker
+             - **Resume the same sub-agent** from Layer 1 to write deeper queries — this preserves context about table schemas, column quirks, and prior queries. Only start a new sub-agent if switching to a different datasource.
+             - Execute the resulting queries, update the draft report as new findings emerge
+             - **Deepen in layers, not breadth-first**: Go deep on the most important threads before moving to secondary ones
+
+          4. **Incorporate finder patterns**
+             - Review the top patterns from the finder report and identify which are most relevant to the research questions
+             - Use targeted queries to validate and contextualize the most important finder patterns — e.g., drill into the segments the finder identified to understand why they behave differently
+             - Weave confirmed finder insights into the draft report narrative, citing both the finder results and any validation queries
+             - Not every finder pattern needs to appear in the report — focus on patterns that are surprising, actionable, or directly answer a research question
+
+          5. **When to stop deepening**
+             - All research questions from the scope document are answered to sufficient depth
+             - Key finder patterns have been investigated and incorporated where relevant
+             - Additional queries aren't changing the narrative
+             - Obvious follow-up questions a reasonable business person would ask are addressed
+             - The draft report tells a coherent story, not just a collection of isolated facts
+
+          6. **Finalize working files**
+             - Ensure the Q&A tracker has all questions answered or explicitly marked as out-of-scope
+             - Ensure the draft report has citations referencing specific query files for all claims
+             - Ensure all query files produced are listed as the `query_files` output
+
+          ## Output Format
+
+          ### draft_report
+
+          Place in the report directory (e.g., `docs/reports/adhoc/[topic_area]/draft_report.md`).
+
+          **Structure**:
+          ```markdown
+          # [Report Topic] — Draft
+
+          ## Executive Summary
+          [2-3 paragraph overview of key findings]
+
+          ## [Conclusion-oriented title, e.g., "2 Departments Drive 80% of the Increase"]
+          [Findings with inline citations to query files]
+
+          Key finding: [statement] (see `queries/[query_file].md`)
+
+          ### [Sub-section for deeper analysis]
+          [Deeper findings from Layer 2+ queries]
+
+          ## [Another conclusion, e.g., "Volume Shifted to Price After 2021"]
+          [...]
+
+          ## Conclusions
+          [Summary of findings and their implications]
+
+          ## Open Questions
+          [Any questions that were identified but not fully answered — with explanation]
+          ```
+
+          ### qa_tracker
+
+          Place in the report directory (e.g., `docs/reports/adhoc/[topic_area]/qa_tracker.md`).
+
+          **Structure**:
+          ```markdown
+          # Q&A Tracker: [Report Topic]
+
+          ## Research Questions
+
+          ### Q1: [Question from scope document]
+          - **Status**: Answered / In Progress / Out of Scope
+          - **Answer**: [Summary of finding]
+          - **Source**: `queries/[query_file].md`
+          - **Follow-ups generated**:
+            - Q1a: [Deeper question prompted by the answer]
+
+          ### Q1a: [Follow-up question]
+          - **Status**: Answered
+          - **Answer**: [...]
+          - **Source**: `queries/[query_file].md`
+
+          ### Q2: [Next research question]
+          [...]
+          ```
+
+          ### query_files
+
+          All query `.md` files produced during analysis. These live in the report's `queries/` directory and follow the standard query file format (YAML frontmatter with sql, output, description, applicable_reference_files).
+
+          ## Context
+
+          This is the "Analyze" phase — the core of the research report workflow. The quality of the final report depends almost entirely on the depth and rigor of this step. The draft produced here will be polished in the present step, so focus on getting the content right rather than perfecting the prose. The key discipline is maintaining the three working files (queries, Q&A tracker, draft) so nothing gets lost and the narrative builds progressively rather than being assembled at the end.
+        inputs:
+          scope_document:
+            required: true
+          finder_report:
+            required: true
+        outputs:
+          draft_report:
+            required: true
+          query_files:
+            required: true
+          qa_tracker:
+            required: true
+
+      - name: present_report
+        instructions: |
+          # Present Report
+
+          ## Objective
+
+          Transform the draft report into a polished final deliverable with narrative polish and professional formatting appropriate for the target audience.
+
+          ## Task
+
+          The draft report has the right content but may not be presentation-ready. This step focuses on polishing the narrative in-place, assembling supporting materials, and then delegating final formatting to the `report_formatting/format_report` workflow.
+
+          ### Process
+
+          1. **Review the draft and scope**
+             - Read the `draft_report` from the analyze step
+             - Re-read the scope document (in the report directory) to recall the audience and format requirements
+             - Identify areas that need polishing: unclear prose, missing transitions
+
+          2. **Polish the narrative**
+             - Edit the `draft_report` file in-place — all narrative improvements are made directly in this file
+             - Write or refine the executive summary — this should stand alone for readers who won't read the full report
+             - Ensure sections flow logically from one to the next
+             - Ensure h2 section titles state the conclusion or finding, not the analysis process (e.g., "2 Departments Drive the Change" not "Department Breakout"; "Volume Shifted to Price After 2021" not "Volume vs Price Decomposition")
+             - Tighten prose: remove redundancy, clarify jargon, strengthen conclusions
+             - Add callout boxes or highlighting for key findings
+             - Ensure the conclusion is actionable — what should the reader do with this information?
+
+          3. **Incorporate finder analysis patterns**
+             - Read the `finder_report` from the finder_analysis step
+             - Integrate the most relevant finder patterns into the draft report as a new section (e.g., "Pattern Analysis" or "Statistically Significant Patterns")
+             - Place this section where it fits best in the narrative — typically after the main findings and before the conclusion
+             - Cross-reference finder patterns with the narrative findings from the analyze step:
+               - Highlight where finder patterns reinforce or provide statistical backing for narrative findings
+               - Call out any surprising patterns that weren't surfaced in the manual analysis
+               - Note any contradictions between finder results and narrative findings, with possible explanations
+             - Summarize the finder methodology briefly (e.g., "Automated pattern discovery was run on [dataset] using [KPI] as the outcome metric") so readers understand the source
+             - Do not simply paste the entire finder report — curate the most relevant patterns and integrate them into the report's narrative voice
+
+          4. **Surface important Q&A items**
+             - Read the `qa_tracker` from the analyze step
+             - Identify any questions that are important to the report's audience but were deferred, partially answered, or out of scope
+             - If there are noteworthy items not already covered in the draft, add a **Q&A** section near the end (before Methodology/Appendix) that:
+               - Lists each important question with its status and a brief explanation of why it wasn't fully answered
+               - Links to the full Q&A tracker for readers who want the complete picture (e.g., "For the complete research Q&A, see `[path]/qa_tracker.md`")
+             - Skip this section if the draft body already covers everything important from the Q&A tracker — don't add it just for the sake of having one
+
+          5. **Assemble supporting materials**
+             - Ensure the report directory contains all supporting files (scope document, Q&A tracker, draft, finder report, query files in `queries/`)
+             - These provide an audit trail for anyone who wants to verify the analysis
+
+          6. **Format for delivery**
+             - Invoke the `report_formatting/format_report` workflow to transform the polished draft into the final formatted deliverable
+
+          ## Output Format
+
+          ### final_report
+
+          The final formatted report produced by the `report_formatting/format_report` workflow. The format and structure are determined by that workflow based on the polished draft content.
+
+          ## Context
+
+          This is the "Present" phase of the research report workflow. The hard analytical work is done — this step is about polishing the narrative and then handing off to `report_formatting/format_report` for final formatting. The content should already be solid from the analyze step; this step refines the prose and ensures completeness before the formatting workflow handles visual presentation.
+        inputs:
+          draft_report:
+            required: true
+          query_files:
+            required: true
+          qa_tracker:
+            required: true
+          finder_report:
+            required: true
+        outputs:
+          final_report:
+            required: true
+
+      - name: collect_feedback
+        instructions: |
+          # Collect Feedback
+
+          ## Objective
+
+          Present the final report to the user, collect their feedback, and either complete the workflow or route back to the appropriate earlier step for fixes using `go_to_step`.
+
+          ## Task
+
+          This is the final step. Present the deliverable, gather the user's reaction, and if revisions are needed, use `go_to_step` to navigate back to the right step rather than making ad-hoc fixes inline. This ensures proper quality gates are re-run on the revised output.
+
+          ### Process
+
+          1. **Present the final report**
+             - Read the `final_report` from the present step
+             - Open the report for the user to review using `open` (macOS) or `xdg-open` (Linux)
+             - Summarize the key findings and structure for the user
+             - If the report is short enough, present key sections inline; otherwise provide a concise overview
+
+          2. **Collect feedback**
+             - Ask structured questions using the AskUserQuestion tool to gather their reaction:
+               - Does the report answer their original questions?
+               - Is the depth of analysis sufficient?
+               - Are there areas that need more detail or clarification?
+               - Is the format and presentation acceptable?
+             - Listen for both explicit feedback and implied concerns
+
+          3. **Triage feedback and go back if needed**
+             - If the user is satisfied -> proceed to close out (step 4)
+             - If the user reports issues, classify them and use `go_to_step` to route back to the appropriate step:
+
+             **Content or data issues** (wrong numbers, missing analysis, incorrect conclusions, need more data, missing sections):
+             - Use `go_to_step` to navigate back to **analyze_data**
+             - In the go_to_step message, include: "USER FEEDBACK — content/data issues to fix: [summary of user's feedback]. Focus specifically on these issues when re-executing this step."
+
+             **Narrative or structural issues** (poor flow, unclear writing, missing executive summary, bad section ordering, emphasis wrong):
+             - Use `go_to_step` to navigate back to **present_report**
+             - In the go_to_step message, include: "USER FEEDBACK — narrative/structural issues to fix: [summary of user's feedback]. Focus specifically on these issues when re-executing this step."
+
+             **Formatting or visual issues** (layout problems, chart rendering, component issues, styling):
+             - Use `go_to_step` to navigate back to **present_report**
+             - In the go_to_step message, include: "USER FEEDBACK — formatting/visual issues to fix: [summary of user's feedback]. The report_formatting sub-workflow should address these issues."
+
+             - If the user reports a mix of issue types, go back to the earliest applicable step
+
+          4. **Close out (user approved)**
+             - Once the user is satisfied, confirm the final report location and supporting materials
+             - **Critical**: Call `finished_step` BEFORE presenting the final summary to the user
+             - If the analysis was extensive, offer to run `/deepwork Run learn to capture learnings for future analyses`
+             - Optionally write brief `feedback_notes` recording what feedback was given and what changes were made
+
+          ## Output Format
+
+          ### feedback_notes
+
+          Optional. A brief markdown file in the report directory recording feedback received and changes made.
+
+          **Structure**:
+          ```markdown
+          # Feedback Notes: [Report Topic]
+
+          ## Feedback Received
+          - [Summary of user feedback point 1]
+          - [Summary of user feedback point 2]
+
+          ## Action Taken
+          [Completed workflow / Used go_to_step to return to [step_name] for: [brief reason]]
+
+          ## Final Status
+          [Satisfied / Sent back for revision]
+          ```
+
+          ## Context
+
+          This is the "Feedback" phase -- the last step in the research report workflow. The report is done; this step ensures the user is happy with it. Rather than making ad-hoc fixes inline, this step uses `go_to_step` to route back to the appropriate earlier step, which ensures the full quality gate pipeline (reviews, proofing, etc.) is re-run on the revised output. The workflow will loop through the remaining steps again until the user is satisfied.
+        inputs:
+          final_report:
+            required: true
+        outputs:
+          feedback_notes:
+            required: false
+
+  define_report:
+    summary: "Define a regularly-used report by researching norms, creating a job/workflow, and optionally adding automated follow-up"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      This job handles core data analysis tasks across all datasources.
+
+      ## Key Context Sources
+      - Read `business_context/overview.md` for high-level business overview and context
+      - Read `datasources/[source_name]/key_tables.md` for key tables in each datasource
+      - Explore `datasources/[source_name]/catalog/` for detailed table schemas and metadata
+      - Check `queries/reference/` for vetted example queries that can be reused or adapted
+
+      ## Query File Format and Tools
+      See `utilities/HOW_TO_QUERY.md` for the query file format specification (frontmatter keys,
+      output modes, diagnostic flags) and query tool usage.
+
+      ## Query File Placement
+      - Report queries: place in the appropriate `docs/reports/[topic]/[report]/[instance]/queries/` subdirectory
+      - Ad-hoc queries: place in `queries/adhoc/`
+      - Reference queries in `queries/reference/` should be reused unaltered when appropriate, or adapted as a basis
+
+      ## Important Conventions
+      - Always include a LIMIT on queries based on expected result size to avoid runaway queries
+      - If workarounds were needed in the SQL, add comments explaining them
+      - When unsure about tables or columns, use AskUserQuestion with suggestions based on available data
+      - Any user answers that represent generally useful info should be recorded in the relevant table .md file and datasource README.md
+
+      ## Report File Structure
+      Reports are organized under `docs/reports/`:
+      - Ad-hoc (one-off) reports: `docs/reports/adhoc/[topic_area]/`
+      - Standard reports: `docs/reports/[topic_or_department]/[report_name]/[instance_identifier]/`
+
+      Each report directory contains everything together:
+      - The final output file (a Report, Presentation, or Raw Markdown file), with a clear identifier name
+      - `queries/` — query files used to generate the report
+      - Any intermediate files (scope document, Q&A tracker, draft report, etc.)
+    steps:
+      - name: identify_job
+        instructions: |
+          # Identify Job
+
+          ## Objective
+
+          Determine what domain area or metric focus this regular report is about (e.g., "engineering" for a departmental standing report, "customer_retention" for a focused metric report). Assess whether an existing DeepWork job should host the report workflow or whether a new job is needed.
+
+          ## Task
+
+          This step is about understanding what the report covers and finding the right home for it in the DeepWork job hierarchy. Regular reports deserve their own dedicated workflows, but the workflow should live inside a job that makes sense for its domain.
+
+          ### Process
+
+          1. **Understand the report**
+             - Read the `report_description` input to understand what the user wants
+             - Ask structured questions using the AskUserQuestion tool to clarify:
+               - What is the core domain or metric area? (e.g., "engineering productivity", "customer churn", "financial performance")
+               - Who is the audience? (executives, department leads, analysts)
+               - How often will this report run? (weekly, monthly, quarterly)
+               - What datasources are involved?
+             - Distill the report into a clear domain identifier — a short label like `customer_retention`, `engineering`, `web_analytics`, `financial_performance`
+
+          2. **Examine existing jobs**
+             - Read all existing job definitions in `.deepwork/jobs/*/job.yml`
+             - IMPORTANT: Only use jobs in `.deepwork/jobs/`. Never use the tool-provided built-in jobs (like `analysis`) — those are internal workflows and must not host user-defined reports.
+             - For each job, evaluate:
+               - Does the job's domain match the report's domain?
+               - Would the report fit naturally alongside the job's existing workflows?
+               - Would adding this report dilute the job's focus or create a grab-bag?
+             - Pay special attention to jobs that already have `common_job_info_provided_to_all_steps_at_runtime` relevant to the report's datasources
+
+          3. **Make a recommendation**
+             - If an existing job fits: recommend it with a clear explanation of why
+             - If no existing job fits: propose a new job name and scope
+             - If it's a borderline case: present both options with trade-offs and let the user decide via a structured question
+
+          4. **Create the initial report specification**
+             - Create `report_specification.md` at the report-type folder level: `docs/reports/[topic]/[report_name]/report_specification.md`
+               - For example: `docs/reports/customer_success/monthly_churn_report/report_specification.md`
+             - This file will be progressively enriched by each subsequent step of the `define_report` workflow
+             - At this stage, populate the Overview section (domain, audience, cadence, datasources) and the Job Assessment section (existing jobs evaluated, recommendation, rationale)
+             - Instance directories (e.g., `2026-02/`) will be created inside this folder when the report workflow runs
+
+          ## Output Format
+
+          ### report_specification
+
+          The initial report specification at the report-type folder level. This file is the authoritative definition of what each instance of the report must deliver. It will be progressively enriched by subsequent steps.
+
+          **Initial structure** (populated by this step):
+          ```markdown
+          # Report Specification: [Report Name]
+
+          ## Overview
+          - **Domain**: [domain identifier, e.g., "customer_retention"]
+          - **Audience**: [who reads it]
+          - **Cadence**: [how often it runs]
+          - **Key Datasources**: [which datasources are involved]
+          - **Generating Job**: [job name — existing or to be created]
+          - **Generating Workflow**: [to be defined in create_workflow step]
+
+          ## Metrics & KPIs
+          [To be populated by research_the_area step]
+
+          ## Report Structure
+          [To be populated by research_the_area step]
+
+          ## Analyses Required
+          [To be populated by research_the_area step]
+
+          ## Research & Domain Norms
+          [To be populated by research_the_area step]
+
+          ## Sources
+          [To be populated by research_the_area step]
+
+          ## Quality Expectations
+          [To be populated by create_workflow step]
+
+          ## Follow-Up Automation
+          [To be populated by add_actioning step]
+          ```
+
+          ## Context
+
+          This is the first step of the `define_report` workflow. Getting the job placement right matters because the job's `common_job_info` and existing workflows set the context for the new report workflow. Putting a report in the wrong job leads to mismatched context, while creating unnecessary new jobs leads to fragmentation. The goal is a logical, maintainable job structure.
+        inputs:
+          report_description:
+            required: true
+        outputs:
+          report_specification:
+            required: true
+
+      - name: research_the_area
+        instructions: |
+          # Research the Area
+
+          ## Objective
+
+          Conduct web research on reporting and analysis norms for the report's topic area. Understand what metrics, KPIs, benchmarks, frameworks, and report structures are standard so the workflow produces industry-quality output.
+
+          ## Task
+
+          Before designing the report workflow, you need to understand what "good" looks like for this type of report. This step uses web research to build that understanding. The findings will directly inform what steps the workflow should have, what analyses to run, and what sections to include.
+
+          ### Process
+
+          1. **Read prior context**
+             - Read the `report_specification` from the previous step to understand the report's domain, audience, cadence, datasources, and job assessment
+
+          2. **Research reporting norms**
+             - Use web search to research how professionals in this domain approach reporting
+             - Key research questions:
+               - What are the standard metrics and KPIs for this type of report? (e.g., for customer retention: churn rate, NRR, DAU/MAU ratio, cohort retention curves)
+               - What frameworks or methodologies are commonly used? (e.g., for financial reporting: variance analysis, trend decomposition)
+               - What benchmarks exist? (e.g., "SaaS median gross churn is 5-7% annually")
+               - What report structures are typical? (e.g., executive summary, metric dashboard, deep dives, recommendations)
+               - What common pitfalls should the workflow avoid? (e.g., vanity metrics, survivorship bias)
+             - Search for examples of professional reports in this domain, industry best practice guides, and analyst frameworks
+             - If the report involves a specific tool ecosystem (e.g., SEO tools, financial platforms), research what reporting capabilities those tools offer
+
+          3. **Research data analysis patterns**
+             - What types of analyses are standard for this domain?
+               - Trend analysis, cohort analysis, segmentation, benchmarking, forecasting, root cause analysis
+             - What time horizons matter? (trailing 30 days, quarter-over-quarter, year-over-year)
+             - What drill-down dimensions are typical? (by product, region, customer segment, channel)
+
+          4. **Update the report specification**
+             - Edit the `report_specification.md` to populate and enrich multiple sections with research findings:
+               - **Metrics & KPIs**: Standard metrics with definitions, formulas, and benchmarks
+               - **Report Structure**: Expected sections and their purpose
+               - **Analyses Required**: Standard analyses for this domain (cohort, segmentation, trend, etc.) with typical dimensions
+               - **Research & Domain Norms**: A new section capturing the full research findings — analysis frameworks, time horizons, common pitfalls, tool ecosystem notes, and anything else relevant to this domain's reporting norms
+               - **Sources**: Cited sources for key research claims
+             - These additions define what every instance of the report must deliver and provide domain context for the workflow designer
+             - Focus on actionable insights, not exhaustive literature review
+
+          ## Output Format
+
+          ### report_specification
+
+          The updated `report_specification.md` with research findings incorporated. All research content goes directly into the specification — there is no separate research notes file.
+
+          The specification should now include (in addition to the Overview and Job Assessment sections from the previous step):
+
+          ```markdown
+          ## Metrics & KPIs
+          - **[Metric Name]**: [Definition and why it matters]
+            - Calculation: [how to compute it]
+            - Benchmark: [industry benchmark if available]
+
+          ## Report Structure
+          1. [Section Name] — [what it covers and why]
+          2. [Section Name] — [what it covers and why]
+
+          ## Analyses Required
+          | Analysis Type | Purpose | Typical Dimensions |
+          |---|---|---|
+          | [e.g., Cohort analysis] | [e.g., Track retention over time] | [e.g., signup month, plan tier] |
+
+          ## Research & Domain Norms
+          ### Analysis Frameworks
+          - **[Framework Name]**: [Brief description and when to use it]
+
+          ### Time Horizons & Cadence
+          - [What time periods are standard for this domain]
+          - [How the report cadence affects what to show]
+
+          ### Common Pitfalls
+          - [Pitfall]: [Why it's a problem and how to avoid it]
+
+          ### Tool Ecosystem
+          [If applicable — what specialized tools or platforms are commonly used]
+
+          ## Sources
+          - [Source 1]: [URL or reference]
+          - [Source 2]: [URL or reference]
+          ```
+
+          ## Context
+
+          This is the second step of the `define_report` workflow. The research done here directly shapes the workflow created in the next step (`create_workflow`). Without understanding domain norms, the workflow risks producing a report that misses standard metrics, uses the wrong analysis approaches, or has an unusual structure that confuses the audience. The goal is to bring domain expertise into the workflow design.
+        inputs:
+          report_specification:
+            required: true
+        outputs:
+          report_specification:
+            required: true
+
+      - name: create_workflow
+        instructions: |
+          # Create Workflow
+
+          ## Objective
+
+          Create the job (if needed) and a report-producing workflow by starting the `deepwork_jobs/new_job` sub-workflow. The workflow should follow the five-phase pattern from `research_report_job_best_practices.md` and incorporate domain-specific norms from the research step.
+
+          ## Task
+
+          This step uses the DeepWork job creation system to produce a complete, reviewable workflow for the regular report. You are not authoring the job.yml by hand — you launch the `deepwork_jobs/new_job` workflow and guide it with context from the prior steps.
+
+          ### Process
+
+          1. **Gather context**
+             - Read the `report_specification` from `research_the_area` — it contains everything: the report's domain, audience, cadence, datasources, job assessment, standard metrics, KPIs, benchmarks, report structure, analyses, and domain norms
+             - Read `research_report_job_best_practices.md` in this job's directory (`src/unsupervised_jobs/analysis/research_report_job_best_practices.md`) to understand the five-phase pattern
+             - Read the `ad_hoc_research_report` workflow in this job's `job.yml` as a reference for a well-structured report workflow — its step definitions, reviews, and quality criteria are a good model
+
+          2. **Prepare reference material**
+             - Save the report specification and any relevant domain context into the target job's directory so the `new_job` workflow can reference them
+             - If creating a new job, the `new_job` workflow will create the directory structure
+
+          3. **Start the sub-workflow**
+             - Start the `deepwork_jobs/new_job` workflow using the DeepWork MCP tools:
+               - `job_name`: `"deepwork_jobs"`
+               - `workflow_name`: `"new_job"`
+               - `goal`: A clear description that includes: the report's purpose, audience, cadence, and key metrics from the research. Reference the report specification file path so the sub-workflow can read it.
+               - `instance_id`: The report workflow name (e.g., `monthly_retention_report`)
+             - When the `new_job` define step asks questions, provide answers informed by:
+               - The report domain, audience, and job assessment from the specification's Overview section
+               - The standard metrics, analyses, and report structure from the specification's research sections
+               - The five-phase pattern from `research_report_job_best_practices.md`
+
+          4. **Guide the workflow design**
+             - Ensure the workflow follows the five-phase pattern where appropriate:
+               1. **Prepare** — Validate tools and datasource connectivity
+               2. **Align** — Light research, clarify scope with user
+               3. **Analyze** — Core query and analysis cycle with iterative deepening
+               4. **Present** — Polish the narrative in-place, then invoke `report_formatting/format_report` for final formatted delivery
+               5. **Feedback** — User review and iteration
+             - Not every report needs all five phases as separate steps — some may combine naturally for simpler reports. In particular, the **Align** step is almost never needed as a separate step for recurring reports — the report specification itself serves as the alignment document, so scope clarification happens at define-time, not at each run.
+             - Ensure the domain-specific metrics and analyses from the research step are reflected in step descriptions and quality criteria
+             - Ensure reviews are defined for critical steps, especially the final output
+             - Use the `write_queries` sub-workflow pattern from the existing `analyze_data` step as a model for data gathering steps
+             - **Common pitfall**: Step instructions should reference `common_job_info` for shared context (query tool paths, directory structures, conventions) rather than duplicating that content inline. Redundancy between step instructions and common_job_info is a frequent first-draft issue — the `new_job` implement review will catch it, but getting it right up front saves a revision cycle.
+
+          5. **Complete the sub-workflow**
+             - Follow the `new_job` workflow through all its steps (define, implement, etc.)
+             - Once the sub-workflow completes, the job.yml and step instruction files will exist
+
+          6. **Update the report specification**
+             - Edit the `report_specification.md` to add:
+               - **Generating Workflow**: Fill in the workflow name (e.g., `customer_success/monthly_churn_report`)
+               - **Quality Expectations**: What each instance must satisfy — drawn from the workflow's review criteria
+             - The specification now serves as the authoritative reference that each report instance's reviews check against
+
+          7. **Record the output**
+             - Note the path to the created/updated `job.yml` as the `workflow_job_yml` output
+
+          ## Output Format
+
+          ### workflow_job_yml
+
+          The `job.yml` file created or updated by the `deepwork_jobs/new_job` sub-workflow. This is not a new file you create — it is the output of the sub-workflow.
+
+          The file will be at one of:
+          - `.deepwork/jobs/[job_name]/job.yml` (for custom jobs)
+          - `src/unsupervised_jobs/[job_name]/job.yml` (for built-in jobs, if updating an existing one)
+
+          **What to look for in the output**:
+          - The workflow follows the five-phase pattern appropriately
+          - Domain-specific metrics and analyses from the research are reflected in step descriptions
+          - Reviews are defined for critical steps with meaningful quality criteria
+          - The `common_job_info_provided_to_all_steps_at_runtime` includes relevant domain context
+          - Step dependencies form a logical chain
+
+          **Negative example — what NOT to do**:
+          ```yaml
+          # BAD: Generic steps with no domain context
+          steps:
+            - id: gather_data
+              description: "Gather data for the report"  # Too vague — what data? from where?
+              reviews: []  # No quality gates on data gathering
+
+            - id: write_report
+              description: "Write the report"  # No mention of structure, metrics, or audience
+              reviews: []  # No review on the final deliverable!
+          ```
+
+          ## Context
+
+          This is the third step of the `define_report` workflow. It is the core step — all prior steps (understanding the domain, researching norms) were preparation for creating this workflow. The workflow produced here will be run repeatedly to generate the regular report, so getting its structure and quality gates right is high-leverage. The `deepwork_jobs/new_job` sub-workflow handles the mechanics of job creation; your job is to bring the domain knowledge and best practices to guide it.
+        inputs:
+          report_specification:
+            required: true
+        outputs:
+          workflow_job_yml:
+            required: true
+          report_specification:
+            required: true
+
+      - name: add_actioning
+        instructions: |
+          # Add Actioning
+
+          ## Objective
+
+          Review the report workflow and business context to propose automated follow-up investigations that can be triggered by report findings. If the user wants this, create a follow-up workflow and update the report workflow to suggest running it.
+
+          ## Task
+
+          Reports often surface findings that demand deeper investigation. Rather than requiring the user to manually initiate follow-ups each time, this step proposes automated investigation workflows that can be triggered by specific types of findings.
+
+          ### Process
+
+          1. **Review context**
+             - Read the `workflow_job_yml` from the previous step to understand the report's structure, metrics, and analyses
+             - Read the `report_specification` from the previous step — it contains domain norms, metrics, analyses, and research findings
+             - Read `business_context/overview.md` to understand the business and what tools/platforms are available. If this file doesn't exist, note that business context is unavailable — this limits the ability to propose tool-integrated follow-ups and may make "skip for now" the right recommendation.
+             - Read datasource documentation to understand what data is available for investigation
+
+          2. **Identify follow-up opportunities**
+             - Think about what types of findings the report might surface that would benefit from automated deeper investigation
+             - Consider the tools and datasources available to the business
+             - Examples by domain:
+               - **Web analytics report**: If organic search traffic drops for a product category, automatically investigate using an SEO tool
+               - **Customer retention report**: If churn spikes in a segment, automatically pull support tickets and usage data for that segment
+               - **Financial report**: If a cost center exceeds budget, automatically break down the overage by vendor and time period
+               - **Engineering report**: If build times increase, automatically analyze the CI pipeline logs for the slowest steps
+             - Focus on follow-ups that are:
+               - Triggered by specific, detectable conditions in the report data
+               - Actionable — they produce information that helps resolve the issue
+               - Feasible with available tools and datasources
+
+          3. **Propose to the user**
+             - Ask structured questions using the AskUserQuestion tool to present your follow-up ideas
+             - For each proposed follow-up, explain:
+               - What report finding would trigger it
+               - What the investigation would do
+               - What tools/datasources it would use
+               - What the output would be
+             - Give the user clear options: accept some/all proposals, modify them, or skip follow-up automation entirely
+             - If the user has no interest in automated follow-ups, that's a valid outcome — record it and move on
+
+          4. **If the user accepts follow-ups**
+             - Start the `deepwork_jobs/new_job` sub-workflow to create the follow-up workflow:
+               - Name it `[report_name]_follow_up` (e.g., `monthly_retention_report_follow_up`)
+               - Place it in the same job as the report workflow
+               - The workflow should accept the report's findings/data as input and produce an investigation summary
+             - Update the report workflow's final step (typically `collect_feedback` or equivalent) to suggest running the follow-up workflow when relevant findings are detected
+               - This should be a suggestion, not automatic — the user should decide whether to trigger the follow-up
+
+          5. **Update the report specification**
+             - Edit the `report_specification.md` to populate the **Follow-Up Automation** section with everything about the actioning assessment:
+               - What follow-ups were proposed, with trigger conditions, investigation details, tools/datasources, and expected output
+               - The user's decision on each proposal (accepted, modified, rejected with reason)
+               - If follow-ups were created: the workflow name and which report step was updated to suggest it
+               - If no follow-ups: why none were configured (e.g., no external integrations, user declined)
+             - This is the final enrichment — the report specification is now complete
+
+          ## Output Format
+
+          ### report_specification
+
+          The completed `report_specification.md`. The Follow-Up Automation section should now contain:
+
+          ```markdown
+          ## Follow-Up Automation
+
+          ### Proposals Evaluated
+
+          #### 1. [Follow-Up Name]
+          - **Trigger**: [What report finding triggers this]
+          - **Investigation**: [What it would do]
+          - **Tools/Datasources**: [What it uses]
+          - **Output**: [What it produces]
+          - **Decision**: [Accepted / Modified / Rejected — with reason if rejected]
+
+          ### Outcome
+          [Summary: which follow-ups were created, or why none were configured]
+          [If created: workflow name, which report step suggests it]
+          ```
+
+          ## Context
+
+          This is the final step of the `define_report` workflow. It adds proactive value by making reports not just informational but actionable. The key principle is that follow-ups should be suggestions, not automatic — the user should always decide whether to trigger deeper investigation. Not every report needs automated follow-ups, and that's fine. The step exists to surface the opportunity and let the user decide.
+        inputs:
+          workflow_job_yml:
+            required: true
+          report_specification:
+            required: true
+        outputs:
+          report_specification:
+            required: true

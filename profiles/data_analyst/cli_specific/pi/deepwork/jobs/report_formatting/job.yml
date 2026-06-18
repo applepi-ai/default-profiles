@@ -1,0 +1,776 @@
+name: report_formatting
+summary: "Format draft .md reports into polished Slidev presentations or DocBaker documents"
+
+step_arguments:
+  - name: draft_report_path
+    description: "Path to the draft report in .md format"
+    type: file_path
+
+  - name: output_notes
+    description: "Notes about desired output type (presentation vs document), key points to focus on, style preferences, etc. Optional but recommended."
+    type: string
+
+  - name: requirements_doc_path
+    description: "Path to a report requirements document, if one exists. Optional."
+    type: file_path
+
+  - name: validation_report
+    description: "Validation report confirming inputs are ready, or detailing issues that need resolution before proceeding"
+    type: file_path
+
+  - name: source_file
+    description: "The Slidev .md presentation file or DocBaker input file"
+    type: file_path
+
+  - name: custom_components
+    description: "Any custom Vue/HTML components created for charts, layouts, or other special elements"
+    type: file_path
+
+  - name: compiled_output
+    description: "The compiled HTML output file, verified as rendering correctly"
+    type: file_path
+
+  - name: chart_screenshots
+    description: "Per-chart screenshot images from the validation directory (e.g., report_chart_1.png). Produced automatically by validate_html."
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Examine all chart screenshots together. These are cropped images
+        of each chart in isolation, making it easier to spot issues than on the
+        full-page screenshot.
+
+        Evaluate against these criteria:
+        - Units on All Values: All numeric values include their units (e.g., "$1.2M" not "1.2", "42%" not "42", "1,200 patients" not "1200"). Axis tick labels, data labels, tooltips, and legend entries must all include units.
+        - Text Legibility: All text within the chart is legible and not overlapping. Axis labels, legend entries, data labels, and titles are fully readable at normal zoom. No text is truncated, rotated to the point of illegibility, or obscured by other elements.
+        - Labels and Legends Visible: All axis labels, legends, and titles are fully visible — not cut off by the chart boundary or overlapping the chart area. The chart title clearly describes what the chart shows.
+        - Chart Series Names: Charts have series names/legend entries that read properly and are clearly labeled. Series names are descriptive (not generic like "Series 1").
+        - No Chart Element Overlap: Elements inside the chart (bars, lines, labels, legends, axes) do not overlap each other problematically. Labels do not collide with data elements.
+        - Visual Appeal: The chart looks compelling and professional — not a boring default rendering. Colors are intentional and distinguishable. The chart makes effective use of the available space.
+        - Color Accessibility: Colors used in the chart are distinguishable from each other and would remain distinguishable for readers with common color vision deficiencies. Avoid relying solely on red/green distinctions.
+
+  - name: section_screenshots
+    description: "Per-section screenshot images from the validation directory (e.g., report_section_1.png). Produced automatically by validate_html."
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Examine all section screenshots together for layout quality. These are cropped
+        images of individual document sections, making it easier to evaluate
+        layout balance and readability than on the full-page screenshot.
+
+        Evaluate against these criteria:
+        - Text Legibility and Layout: All text within the section is legible and properly laid out. Paragraphs have appropriate line spacing and margins. Text does not overflow its container or get cut off.
+        - Column Balance: If the section uses a two-column layout, columns are reasonably balanced in length. One column should not end with a large blank gap while the other has significantly more content. Charts or figures that cause severe imbalance should be made full-width with <Wide>.
+        - Element Proportions: Headings, paragraphs, charts, tables, and other visual elements are well-proportioned relative to each other. Headings stand out from body text. Charts are large enough to be readable.
+        - Professional Polish: The overall section looks polished and professional. Spacing between elements is consistent. There are no rendering artifacts, broken borders, or misaligned components.
+        - No Rendering Artifacts: There are no broken layout elements, missing images, empty boxes, or other rendering artifacts. All components render as intended.
+
+  - name: response_summary
+    description: "Summary of the delivered output, tradeoffs considered, and instructions for requesting changes"
+    type: file_path
+
+  - name: review_notes
+    description: "Notes on the user's review outcome — whether approved or sent back for revision, and what feedback was given"
+    type: file_path
+
+workflows:
+  format_report:
+    summary: "Format a draft Markdown report into a Slidev presentation or DocBaker document"
+    agent: "Presentation Expert"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      This workflow takes a draft report in Markdown format and transforms it into a
+      professionally formatted output — either a Slidev presentation or a DocBaker
+      self-contained HTML document, depending on the user's request.
+
+      Key conventions:
+      - The caller provides: (1) a draft .md report, (2) optional notes about desired output
+        type (presentation vs document) and focus areas, (3) an optional requirements document.
+      - If the user requests a "presentation", "deck", or similar → produce a Slidev deck.
+      - If the user requests raw Markdown → abort the workflow (no formatting needed).
+      - For anything else (report, document, etc.) → produce a DocBaker document.
+      - All numbers and charts must have citations — either via a standalone <Citation>
+        component in prose, or via source/sourceUrl/sourceQueryFile/sourceExplanation props
+        directly on Chart, DataTable, CustomEChart, or HorizontalDivergingBarChart components.
+        Never use plain-text patterns like *Source: ...* as markdown — always use the Citation
+        component or component source props.
+      - The Presentation Expert agent's core knowledge file contains component references,
+        theme details, and formatting conventions that must be followed.
+      - Compiled outputs are validated using `validate_html`, which renders in headless
+        Chromium, captures JS errors, and takes screenshots for visual proofing.
+    steps:
+      - name: review_inputs
+        instructions: |
+          # Review Inputs
+
+          ## Objective
+
+          Validate all provided inputs — the draft report, output-type notes, and any requirements document — and confirm that referenced data files are accessible. Flag any material issues or ambiguities before proceeding to typesetting.
+
+          ## Task
+
+          Thoroughly review the draft report and all supporting materials. Your goal is to catch problems early — before time is spent on typesetting and proofing. If there are blockers, return a clear message so the caller can fix them and resume.
+
+          ### Process
+
+          1. **Read the draft report**
+             - Open the draft .md file at the provided path
+             - Understand its structure, sections, and overall narrative
+             - Note any data files it references (CSV files, JSON data, images, query results, etc.)
+
+          2. **Check referenced data files**
+             - For each data file referenced in the draft (chart data, table data, images), verify it exists at the expected path
+             - If a relative path is used, resolve it relative to the draft report's directory
+             - Record which files are found and which are missing
+
+          3. **Review the output notes**
+             - Determine what output type the user wants: presentation/deck (Slidev), document/report (DocBaker), or raw Markdown
+             - If the desired output type is unclear or not specified, this is a material question that must be flagged
+             - Note any style preferences, focus areas, or audience information
+
+          4. **Review the requirements document** (if provided)
+             - Read any requirements doc and understand the constraints it imposes
+             - Check for conflicts between the requirements and the draft content
+             - Note any requirements that may be difficult to satisfy with the chosen output format
+
+          5. **Assess readiness**
+             - If there are **no material issues**: produce a validation report confirming readiness and summarizing key decisions (output type, data files found, etc.)
+             - If there are **material issues**: produce a validation report listing each issue clearly, and instruct the caller to resume the Task with fixes or additional information
+
+          ### What counts as a material issue
+
+          - Output type is ambiguous (can't tell if they want a presentation or a document)
+          - A data file referenced in the draft cannot be found
+          - The draft is incomplete or has placeholder sections that need content
+          - Requirements conflict with the draft content or chosen format
+          - The draft references external resources that are inaccessible
+
+          ### What is NOT a material issue (handle in later steps)
+
+          - Minor formatting or style issues in the draft
+          - Suboptimal narrative ordering (the typesetting step will restructure)
+          - Missing citations (the typesetting review will catch these)
+
+          ## Output Format
+
+          ### validation_report
+
+          A markdown file summarizing the validation results.
+
+          **When inputs are valid:**
+          ```markdown
+          # Input Validation Report
+
+          ## Status: READY TO PROCEED
+
+          ## Output Type Decision
+          - **Requested format**: [Slidev presentation / DocBaker document / Raw Markdown]
+          - **Rationale**: [Why this format was determined from the notes]
+
+          ## Draft Report Summary
+          - **File**: [path to draft]
+          - **Sections**: [count] sections covering [brief topic summary]
+          - **Estimated length**: [approximate word count or page estimate]
+
+          ## Data Files
+          | File Referenced | Path | Status |
+          |---|---|---|
+          | [description] | [path] | Found |
+          | [description] | [path] | Found |
+
+          ## Requirements
+          - [Key requirement 1 from requirements doc]
+          - [Key requirement 2]
+          - [Or: "No requirements document provided"]
+
+          ## Notes for Typesetting
+          - [Any important context for the next step]
+          - [Audience info, style preferences, etc.]
+          ```
+
+          **When issues are found:**
+          ```markdown
+          # Input Validation Report
+
+          ## Status: ISSUES FOUND — ACTION REQUIRED
+
+          ## Issues
+
+          ### 1. [Issue title]
+          **Severity**: [Blocking / Warning]
+          **Details**: [Clear explanation of the problem]
+          **Resolution**: [What the caller needs to do to fix this]
+
+          ### 2. [Issue title]
+          ...
+
+          ## Instructions
+          To proceed, resolve the issues above and resume this Task with:
+          - [Specific fix 1]
+          - [Specific fix 2]
+          ```
+
+          ## Quality Criteria
+
+          - All data files referenced in the draft are checked for existence
+          - Output type is clearly determined or flagged as ambiguous
+          - The validation report is actionable — if issues exist, the caller knows exactly what to fix
+          - No false positives: minor style issues are not flagged as blockers
+          - Requirements document constraints are noted for the typesetting step
+
+          ## Context
+
+          This is the gateway step. Everything downstream depends on having clean inputs. Catching a missing data file here saves the entire typesetting and proofing cycle. Be thorough but practical — flag real problems, not cosmetic ones.
+        inputs:
+          draft_report_path: {}
+          output_notes:
+            required: false
+          requirements_doc_path:
+            required: false
+        outputs:
+          validation_report: {}
+
+      - name: typesetting
+        instructions: |
+          # Typesetting
+
+          ## Objective
+
+          Transform the draft report into a professionally formatted source file — either a Slidev presentation or a DocBaker self-contained HTML document — based on the output type determined in the validation step.
+
+          ## Task
+
+          Read the validation report to understand the output type, then create the source file. If the output type is raw Markdown, abort the workflow immediately.
+
+          ### Process
+
+          1. **Read the validation report**
+             - Confirm the output type: Slidev, DocBaker, or raw Markdown
+             - Review the data files list, requirements, and typesetting notes
+             - Read the original draft report
+
+          2. **Handle raw Markdown requests**
+             - If the output type is raw Markdown, call `abort_workflow` with the explanation: "Raw Markdown was requested — no formatting workflow is needed. The draft report can be used as-is."
+             - Do not proceed further
+
+          3. **Read the Presentation Expert's core knowledge**
+             - Read the core knowledge file at `.deepwork/learning-agents/presentation-expert/core-knowledge.md` for component references, theme details, and formatting conventions
+             - This file contains the available components, layout patterns, and style guidelines you must follow
+
+          4. **Determine structure and layout**
+             - For **Slidev**: Plan the slide breakdown — title slide, section dividers, content slides, data slides, conclusion
+             - For **DocBaker**: Plan the document sections, determine which components to use for data visualization, choose the layout approach
+
+          5. **Create the source file**
+             - Write the complete Slidev `.md` file or DocBaker input file
+             - Use the components and patterns from the Presentation Expert's knowledge base
+             - Ensure all data from the draft is represented — do not drop content
+             - Add proper citations for all numbers and charts (query file name or public URL)
+
+          6. **Create custom components if needed**
+             - If the draft requires visualizations or layouts not covered by existing components, create custom Vue/HTML components
+             - Place custom components in `utilities/<tool>/components/` (e.g., `utilities/slidev/components/` or `utilities/docbaker/components/`)
+             - Follow the conventions documented in the Presentation Expert's core knowledge
+
+          ### Key rules for content transformation
+
+          - **Do not invent data.** Every number, chart, and statistic must come from the draft or referenced data files.
+          - **Double-check MetricCards.** When creating `<Metric>` components, verify that the `value` matches the exact data point named in the `label`. It is easy to accidentally use a related-but-different number (e.g., "Total Charges" instead of "Total Revenue").
+          - **Include units on all numbers.** Every numeric value in charts, tables, and metric cards MUST include its unit. Use formatted strings like `"$1.2M"`, `"15%"`, `"1,200 patients"`, or `"42 days"` — never bare numbers like `1.2`, `15`, `1200`, or `42`. This applies to chart data values, axis labels, metric card values, and table cells. If the chart title or axis label includes the unit (e.g., "Revenue ($K)"), the data values should still include the unit prefix/suffix for clarity when displayed in tooltips and labels.
+          - **Section titles should state conclusions, not processes.** H2 titles should tell the reader the finding (e.g., "Personal Care Dominates Growth") not describe the analysis (e.g., "Service Category Analysis"). If the draft uses process-oriented titles, rewrite them as conclusion-oriented titles during typesetting.
+          - **Maintain the narrative.** The typeset output should tell the same story as the draft, even if restructured for the format.
+          - **Cite everything with `<Citation>` — never as plain text.** Every data point needs a citation. There are two ways to cite:
+            1. **On chart/table components** (preferred for data visualizations): Use the `source`, `sourceQueryFile`, and `sourceExplanation` props directly on the component — e.g., `<BarChart ... source="Source: revenue.md" sourceQueryFile="queries/revenue.md" sourceExplanation="Revenue by quarter" />`. This renders a Citation automatically below the chart.
+            2. **Standalone `<Citation>` component** (for prose data points): Use `<Citation display_text="Source: revenue.md" query_file="queries/revenue.md" />` for query files, or `<Citation display_text="Source: Annual Report" url="https://..." explanation="..." />` for URLs.
+
+            **Never use plain-text patterns** like `*Source: queries/foo.md*` or `Source: some_file.md` as italic/bold markdown text. These do not render as interactive citations and break the self-contained output. Every source attribution must go through a `<Citation>` component or a component's `source`/`sourceQueryFile` props.
+          - **Handle surprising numbers.** If a number seems surprising, ensure the output either (a) presents it as surprising and needing investigation, or (b) explains it with context from the draft or data files.
+
+          ## Output Format
+
+          ### source_file
+
+          The primary Slidev `.md` or DocBaker input file.
+
+          **For Slidev**, the file should follow this general structure:
+          ```markdown
+          ---
+          theme: [theme-name]
+          title: [Report Title]
+          ---
+
+          # [Report Title]
+
+          [Subtitle or author info]
+
+          ---
+
+          ## [Section 1 Title]
+
+          [Content with proper formatting, components, and citations]
+
+          ---
+
+          [... additional slides ...]
+          ```
+
+          **For DocBaker**, the file should be an `.mdx` file following this general structure:
+          ```mdx
+          ---
+          title: [Report Title]
+          subtitle: [Subtitle or description]
+          author: [Author or Team Name]
+          date: [Date]
+          theme: newspaper
+          ---
+
+          <Wide>
+          ## Executive Summary
+
+          [Key takeaway in 1-2 sentences with the most important finding or recommendation.]
+          </Wide>
+
+          ## [Conclusion-Oriented Title, e.g., "2 Departments Drive 80% of Growth"]
+
+          [Body text with analysis and context. Standard Markdown prose.]
+
+          <MetricCards cols={3}>
+            <Metric value="$1.2M" label="[KPI Name]" delta="+15% YoY" deltaType="positive" />
+            <Metric value="847 users" label="[KPI Name]" delta="-3% MoM" deltaType="negative" />
+            <Metric value="94%" label="[KPI Name]" />
+          </MetricCards>
+
+          <Citation display_text="Source: [query_file.md]" query_file="queries/[query_file.md]" />
+
+          ## [Conclusion-Oriented Title, e.g., "Volume Shifted to Price After 2021"]
+
+          [Analysis text providing context for the visualization below.]
+
+          <BarChart
+            title="[Chart Title]"
+            data={[
+              { category: '[Label A]', value: '$1.2M' },
+              { category: '[Label B]', value: '$980K' },
+            ]}
+            xKey="category"
+            yKey="value"
+            source="Source: [query_file.md]"
+            sourceQueryFile="queries/[query_file.md]"
+            sourceExplanation="[Brief description of what this query returns]"
+          />
+
+          <DataTable
+            data={[{ col1: '[val]', col2: '[val]' }]}
+            columns={[
+              { key: 'col1', label: '[Column Name]' },
+              { key: 'col2', label: '[Column Name]' },
+            ]}
+            caption="[Table caption]"
+          />
+
+          ## Recommendations
+
+          <Callout type="warning" title="Action Required">
+            [Key recommendations or next steps based on the analysis.]
+          </Callout>
+
+          ---
+
+          *[Methodology notes, data sources, and attribution.]*
+          ```
+
+          Key DocBaker components available (no imports needed):
+          - `<Callout type="info|warning|success|error">` — highlighted info boxes
+          - `<MetricCards>` / `<Metric>` — KPI dashboard cards
+          - `<BarChart>`, `<LineChart>`, `<AreaChart>`, `<PieChart>`, `<WaterfallChart>`, etc. — 15 individual chart components for data visualization
+          - `<DataTable>` — sortable tables
+          - `<Citation>` — inline citation link with popover for source attribution
+          - `<Wide>` — forces content to span both columns at wide viewports
+          - `<Section>` — full-width section wrapper
+          - `<CustomEChart>` — raw ECharts escape-hatch for complex charts
+          - `<Mermaid>` — diagram rendering
+
+          ### custom_components (if needed)
+
+          Any `.vue` or `.html` component files created for custom visualizations or layouts. Only create these when existing components cannot represent the data.
+
+          **Example custom component structure** (Vue SFC):
+          ```vue
+          <template>
+            <div class="custom-viz">
+              <h3>{{ title }}</h3>
+              <!-- Custom visualization markup -->
+            </div>
+          </template>
+
+          <script setup>
+          defineProps({
+            title: { type: String, required: true },
+            data: { type: Array, required: true },
+          })
+          </script>
+
+          <style scoped>
+          .custom-viz {
+            /* Component-specific styles */
+          }
+          </style>
+          ```
+
+          Each component should be self-contained and follow the naming conventions from the Presentation Expert's knowledge base.
+
+          ## Quality Criteria
+
+          - The narrative flow is logical — sections build on each other and tell a coherent story
+          - All numbers, charts, and data visualizations have citations (query file name or public HTTP(S) URL)
+          - **All citations use the `<Citation>` component or the `source`/`sourceQueryFile` props on chart/table components.** No plain-text citation patterns like `*Source: ...*` or `Source: ...` as italic/bold markdown. Every source attribution must be a proper interactive Citation.
+          - **All numeric values include units.** Every number in chart data, metric cards, and tables includes its unit (e.g., `"$1.2M"`, `"42%"`, `"1,200 patients"`, `"18 days"`). No bare numbers without units.
+          - All statements are logically supported or are common knowledge for the target audience
+          - Surprising numbers are either flagged as needing investigation or explained with context
+          - No content from the draft is dropped or omitted without justification
+          - The source file uses appropriate components and follows the Presentation Expert's conventions
+          - Custom components (if any) are well-structured and follow naming conventions
+          - **Two-column layout balance (DocBaker only):** When the document uses a two-column layout, check for columns that are significantly imbalanced in length — especially when one column contains a chart or figure. If a chart or figure causes one column to be much taller than the other, consider: (a) moving the chart after the surrounding text and making it full-width with `<Wide>`, or (b) shifting the chart's position in the text so that column breaks fall more evenly. The goal is to avoid a layout where one column ends with a large blank gap while the other has a tall chart pushing content down.
+
+          ## Context
+
+          This is the creative core of the workflow. You are translating a text draft into a visual, formatted output. The quality of this step determines the quality of the final deliverable. The proofing step will catch visual rendering issues, but narrative and content quality must be right here.
+        inputs:
+          validation_report: {}
+        outputs:
+          source_file: {}
+          custom_components:
+            required: false
+        process_requirements:
+          narrative_flow: "The content MUST follow a logical narrative flow — sections build on each other and the overall story is coherent."
+          citations_for_data: >
+            All numbers, charts, and data visualizations MUST have citations — either
+            via a standalone <Citation> component in prose, or via source/sourceUrl/
+            sourceQueryFile/sourceExplanation props on Chart, DataTable, CustomEChart,
+            or HorizontalDivergingBarChart components. Every data point must trace
+            back to a query file name or a public HTTP(S) URL.
+          no_plain_text_citations: >
+            All source attributions MUST use the <Citation> component or
+            source/sourceQueryFile props on chart/table components. There MUST be
+            no plain-text citation patterns such as *Source: queries/foo.md*,
+            **Source: ...**, or bare "Source: ..." lines rendered as markdown text.
+          logical_support: >
+            All statements MUST be either logically supported by evidence or be common knowledge.
+            If a concept is general knowledge for the target audience, it SHOULD reference the
+            business context element supporting that.
+          surprising_numbers_handled: >
+            Any numbers that seem surprising MUST be properly handled — either (a) presented as
+            surprising and needing further investigation, or (b) investigated and explained
+            in the document. If a surprising number is justified by business context, that
+            context MUST be referenced.
+
+      - name: proofing
+        instructions: |
+          # Proofing
+
+          ## Objective
+
+          Compile the source file, validate it for JavaScript errors, capture screenshots, and visually verify that the rendered output looks correct — charts are readable, tables are properly labeled, and no elements overlap.
+
+          ## Task
+
+          Build the document, run automated validation, and review the screenshots for visual issues. Fix any issues found and recompile until the output meets quality standards.
+
+          ### Process
+
+          1. **Compile the document**
+             - For **Slidev**: Run the Slidev build command to generate the static output
+             - For **DocBaker**: Run the DocBaker compilation to generate the HTML output
+             - If the typesetting step produced custom components, ensure they are in the correct location before compiling
+             - If no custom components were produced (this is normal — most reports use only built-in components), proceed directly with compilation
+             - Note the path to the compiled output file
+
+          2. **Run automated validation**
+             - Run `validate_html <compiled_output.html>` to:
+               - Check for JavaScript errors in the rendered page
+               - Capture screenshots: full-page, per-chart, and per-section images
+             - The tool auto-detects whether the output is DocBaker or Slidev
+             - You can override with `validate_html <file> --mode docbaker` or `--mode slidev`
+             - Check the `validation_report.json` in the output directory for errors/warnings
+             - If the tool reports JS errors (non-zero exit code), fix the source and recompile
+             - Note the validation directory path — it contains:
+               - Full-page screenshots (e.g., `report_full.png`)
+               - Per-chart screenshots (e.g., `report_chart_1.png` or named by figcaption)
+               - Per-section screenshots (e.g., `report_section_1.png` or named by heading)
+
+          3. **Visual inspection of chart screenshots**
+             - Read the per-chart screenshot files from the validation output directory
+             - For each chart screenshot, check:
+               - Do all numeric values include their units (e.g., "$1.2M", "42%", "1,200 patients") — no bare numbers?
+               - Is all text legible and not overlapping? Are axis labels, legend entries, data labels, and titles fully readable?
+               - Are axis labels, legends, and titles fully visible (not cut off by the chart boundary)?
+               - Do all charts have clearly readable series names/legends that are descriptive?
+               - Do bars, lines, labels, legends, or axes overlap each other problematically?
+               - Does the chart look compelling and professional (not a boring default rendering)?
+               - Are the colors distinguishable and accessible?
+
+          4. **Visual inspection of section screenshots**
+             - Read the per-section screenshot files from the validation output directory
+             - For each section screenshot, check:
+               - Is all text legible and properly laid out?
+               - If two-column layout: are columns reasonably balanced in length (no large blank gaps)?
+               - Are headings, paragraphs, charts, tables, and visual elements well-proportioned?
+               - Does the section look polished and professional?
+               - Are there any rendering artifacts, broken borders, or misaligned components?
+
+          5. **Visual inspection of full-page screenshots**
+             - Read the full-page screenshot files from the validation output directory
+             - Check for cross-component and overall layout issues:
+
+             **Tables:**
+             - Do all tables have descriptive column headers?
+             - Do all tables have descriptive row labels?
+             - Is the text in cells readable (not truncated or overlapping)?
+
+             **Layout:**
+             - Do charts, tables, and other components avoid overlapping surrounding text?
+             - Do components avoid overlapping each other?
+             - Is there adequate spacing between elements?
+             - Does content fit within its container (no overflow or cutoff)?
+             - Do any components in a single-column layout cause horizontal scrolling? If so, wrap them in a `Wide` component.
+
+             **General:**
+             - Is text readable at normal zoom level?
+             - Are images and graphics rendering properly?
+             - Do links and citations display correctly?
+
+          6. **Fix and retry** (max 3 cycles)
+             - For each issue found, go back to the source file and fix it
+             - Recompile and re-run `validate_html`
+             - Repeat until all quality criteria pass, up to 3 fix-and-retry cycles
+             - If issues persist after 3 attempts, document the remaining issues in the output and proceed — note what could not be resolved and why
+             - Keep a record of what was fixed for the response step
+
+          7. **Record the final state**
+             - The final screenshots from `validate_html` serve as the visual record
+             - Note the file path for the response step
+
+          ## Output Format
+
+          ### compiled_output
+
+          The path to the compiled HTML file that has been verified as rendering correctly.
+
+          This is the actual output file produced by the Slidev or DocBaker build process. It should have passed both automated validation (no JS errors) and visual inspection.
+
+          ### chart_screenshots
+
+          The per-chart screenshot image files from the validation output directory. These are produced automatically by `validate_html` and are named like `report_chart_1.png` (or by figcaption text if available). List all chart screenshot paths found in the validation directory.
+
+          ### section_screenshots
+
+          The per-section screenshot image files from the validation output directory. These are produced automatically by `validate_html` and are named like `report_section_1.png` (or by heading text if available). List all section screenshot paths found in the validation directory.
+
+          ## Quality Criteria
+
+          - No JavaScript errors reported by `validate_html` (exit code 0)
+          - **Chart screenshots reviewed:** All numeric values include units, text is legible, labels/legends are fully visible, charts look professional, colors are accessible
+          - **Section screenshots reviewed:** Text is legible, column balance is reasonable, elements are well-proportioned, sections look polished, no rendering artifacts
+          - **Full-page screenshots reviewed:** Tables have descriptive labels, no component-text overlap, no single-column horizontal scrolling
+          - All pages/slides have been visually inspected via the three levels of screenshots (chart, section, full-page)
+          - Any issues found have been fixed and the output has been re-verified
+
+          ## Context
+
+          This is the visual quality gate. The typesetting step ensured the content is correct; this step ensures it looks correct and renders without JavaScript errors. The `validate_html` tool eliminates the need for a localhost server or external browser — it renders the HTML in headless Chromium and captures screenshots that you can read directly. Be thorough: check every page/slide, every chart, every table.
+        inputs:
+          source_file: {}
+          custom_components:
+            required: false
+        outputs:
+          compiled_output: {}
+          chart_screenshots:
+            required: false
+          section_screenshots:
+            required: false
+        process_requirements:
+          table_labels: "Tables MUST have column and row names that read properly and are descriptive."
+          no_component_text_overlap: "Components like charts, tables, and other visual elements MUST NOT overlap surrounding text or each other."
+          no_horizontal_scroll: "No component in a single-column layout MUST cause horizontal scrolling. If a component (chart, table, etc.) is too wide for a single column, it MUST be wrapped in a Wide component."
+
+      - name: response
+        instructions: |
+          # Response
+
+          ## Objective
+
+          Deliver the finished output to the user by opening it in their browser and providing a summary of the result, any tradeoffs considered, and instructions for requesting changes.
+
+          ## Task
+
+          Open the compiled file for the user and provide a clear, helpful response summarizing what was produced and how to iterate.
+
+          ### Process
+
+          1. **Open the file in the user's browser**
+             - Use the `open` command to launch the compiled HTML file directly: `open [path_to_compiled_output]`
+             - This opens the rendered output directly in the user's default browser
+
+          2. **Compose the response summary**
+             - State the file name and its location in the project
+             - Briefly describe what was produced (Slidev presentation or DocBaker document)
+             - Note the number of slides/pages and key sections
+             - Explain any tradeoffs or alternatives that came up during the formatting process, such as:
+               - Format choice rationale (why Slidev vs DocBaker was chosen)
+               - Content that was restructured and why
+               - Data visualizations that were simplified or adapted for the format
+               - Components that were custom-built vs using existing ones
+               - Any content from the draft that was intentionally reorganized
+             - Explain that if changes are desired, the caller should resume the Task with the change request
+
+          3. **Write the response summary file**
+             - Save as `response_summary.md` in the report's working directory
+             - This serves as a record of the delivery and the decisions made
+
+          ## Output Format
+
+          ### response_summary
+
+          A markdown file summarizing the delivery.
+
+          ```markdown
+          # Report Formatting Complete
+
+          ## Delivered File
+          - **File**: [path to compiled output]
+          - **Format**: [Slidev presentation or DocBaker document]
+          - **Pages/Slides**: [count]
+
+          ## What Was Produced
+          [1-2 sentence summary of the formatted output]
+
+          ## Key Sections
+          1. [Section or slide group 1]
+          2. [Section or slide group 2]
+          3. [...]
+
+          ## Tradeoffs & Decisions
+          - [Decision 1: what was chosen and why]
+          - [Decision 2: what was chosen and why]
+
+          ## Alternatives Considered
+          - [Alternative 1 that was considered but not chosen, and why]
+
+          ## Requesting Changes
+          To request changes to this output, resume this Task with a description of the desired modifications. Examples:
+          - "Change the color scheme to use blues instead of greens"
+          - "Move the executive summary to the end"
+          - "Add a comparison chart on slide 5"
+          ```
+
+          If there were no significant tradeoffs or alternatives, replace the bullet list in those
+          sections with a single line: "No significant tradeoffs" or "No alternatives considered."
+
+          ## Quality Criteria
+
+          - The file is opened in the user's browser via the `open` command
+          - The response summary includes the file name and path
+          - All significant tradeoffs and decisions are documented
+          - Instructions for requesting changes are clear and include examples
+          - The summary is concise but complete — the user should understand what they're looking at
+
+          ## Context
+
+          This is the delivery step. The hard work is done — now present the result clearly. The user should be able to look at the opened file in their browser while reading your summary to understand what was produced and why certain decisions were made. Making the change-request process clear encourages iteration rather than starting over.
+        inputs:
+          compiled_output: {}
+        outputs:
+          response_summary: {}
+
+      - name: user_review
+        instructions: |
+          # User Review
+
+          ## Objective
+
+          Present the compiled report to the user for visual review. If the user identifies issues, route the workflow back to the appropriate earlier step for targeted fixes.
+
+          ## Task
+
+          Show the user the final output and ask them to review it. Based on their feedback, either complete the workflow or loop back to fix the reported issues.
+
+          ### Process
+
+          1. **Present the report for review**
+             - The compiled output should already be open in the user's browser from the response step
+             - Read and present the report screenshots to the user so they can review the output within the conversation:
+               - Full-page screenshots from the validation directory
+               - Section screenshots (if available)
+               - Chart screenshots (if available)
+             - Tell the user: "The report is open in your browser and screenshots are shown above. Please review and let me know if you see any issues, or confirm that it looks good."
+
+          2. **Collect the user's verdict**
+             - Use AskUserQuestion to ask the user if they see any issues with the report
+             - Wait for the user's response
+             - If the user says it looks good, the report is approved, or similar affirmative → proceed to close out (step 4)
+             - If the user reports issues → proceed to triage (step 3)
+
+          3. **Triage reported issues and go back**
+             - Classify the user's reported issues into one of these categories:
+
+             **Content or data issues** (wrong numbers, missing analysis, incorrect conclusions, missing sections):
+             - These require changes to the source content before re-formatting
+             - Use `go_to_step` to navigate back to **typesetting**
+             - In the go_to_step message, include: "USER FEEDBACK — content/data issues to fix: [summary of user's feedback]. Focus specifically on these issues when re-executing this step."
+
+             **Layout, formatting, or component issues** (wrong chart type, bad column balance, component sizing, styling, typography, component props):
+             - These require changes to the formatted source file
+             - Use `go_to_step` to navigate back to **typesetting**
+             - In the go_to_step message, include: "USER FEEDBACK — layout/formatting issues to fix: [summary of user's feedback]. Focus specifically on these issues when re-executing this step."
+
+             **Rendering or visual issues** (broken rendering, JS errors, visual artifacts, elements cut off, overlapping elements that look like rendering bugs):
+             - These require recompilation or minor source fixes and re-validation
+             - Use `go_to_step` to navigate back to **proofing**
+             - In the go_to_step message, include: "USER FEEDBACK — rendering/visual issues to fix: [summary of user's feedback]. Focus specifically on these issues when re-executing this step."
+
+             - If the user reports a mix of issue types, go back to the earliest applicable step (typesetting covers both content and layout; proofing is only for pure rendering issues)
+
+          4. **Close out (user approved)**
+             - Write a brief `review_notes.md` confirming the user approved the output
+             - Call `finished_step` to complete the workflow
+
+          ## Output Format
+
+          ### review_notes
+
+          A brief markdown file recording the user's review outcome.
+
+          ```markdown
+          # User Review Notes
+
+          ## Outcome
+          [Approved / Sent back for revision]
+
+          ## Feedback
+          [Summary of user's feedback, or "No issues reported — user approved the output."]
+
+          ## Action Taken
+          [Completed workflow / Used go_to_step to return to [step_name] for: [brief reason]]
+          ```
+
+          ## Quality Criteria
+
+          - Screenshots are presented to the user for review (full-page, section, and chart screenshots)
+          - The user is explicitly asked whether the output looks good or if there are issues
+          - If issues are reported, they are correctly triaged to the right step
+          - The `go_to_step` message includes a clear summary of the user's feedback so the receiving step knows what to fix
+          - If no issues, the workflow completes cleanly
+
+          ## Context
+
+          This is the user-facing quality gate. The automated proofing step catches rendering errors and visual defects, but only the user can judge whether the report meets their actual expectations — whether the emphasis is right, the story flows well, the charts communicate clearly, and the overall feel matches what they had in mind. This step creates a feedback loop: the user reviews, reports issues, the workflow fixes them, and the user reviews again until satisfied.
+        inputs:
+          compiled_output: {}
+          chart_screenshots:
+            required: false
+          section_screenshots:
+            required: false
+          response_summary: {}
+        outputs:
+          review_notes:
+            required: false

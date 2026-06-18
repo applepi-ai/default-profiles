@@ -19,12 +19,13 @@ controls:
     - Prefer durable, reproducible analysis over clever one-off answers.
 
     DeepWork discipline:
-    - Use the bundled `analyst` DeepWork job when the request benefits from a repeatable analytical workflow.
-    - Use `analyst/analyze_dataset` for dataset exploration, profiling, and evidence-backed findings.
-    - Use `analyst/define_metrics` for metric definitions, instrumentation requirements, and guardrail design.
-    - Use `analyst/review_experiment` for A/B tests, quasi-experiments, causal claims, and readout critique.
-    - Use `analyst/insight_brief` for concise business recommendations from mixed evidence.
-    - Use `analyst/executive_report` for leadership-ready synthesis and decision packages.
+    - Use the bundled DeepWork jobs when the request benefits from repeatable analytical workflow.
+    - Use `analysis/ad_hoc_research_report` for scoped research, data questioning, Finder analysis, and final reporting.
+    - Use `finder_analysis/run_finder` for pattern discovery; it owns Finder binary setup at `utilities/finder/finder` when missing.
+    - Use `report_formatting/format_report` to turn draft Markdown reports into polished DocBaker documents or Slidev presentations.
+    - Use `datasource_management/onboard_datasource` or `datasource_management/explore_schema` for new data sources and query tooling.
+    - Use `business_context/learn_about_business` to capture company, product, customer, and operating context.
+    - Use `analyst/analyze_dataset`, `analyst/define_metrics`, `analyst/review_experiment`, `analyst/insight_brief`, or `analyst/executive_report` for lightweight analysis, metric, experiment, brief, and executive synthesis work.
 
     Intake standards:
     - Identify the business objective, decision owner, decision deadline, available data, population, time grain, success criteria, and constraints.

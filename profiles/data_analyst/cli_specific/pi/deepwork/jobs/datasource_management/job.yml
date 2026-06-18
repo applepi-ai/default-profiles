@@ -1,0 +1,985 @@
+# yaml-language-server: $schema=.deepwork/schemas/job.schema.json
+name: datasource_management
+summary: "Onboard and document data sources with schema exploration and semantic enrichment"
+
+step_arguments:
+  - name: datasource_name
+    description: "Friendly name for the data source (lowercase, underscores). Used for file naming."
+    type: string
+
+  - name: platform_type
+    description: "Data platform type (e.g., databricks, snowflake, postgres, bigquery)"
+    type: string
+
+  - name: connection_details
+    description: "Server endpoint, authentication method, catalog/database, warehouse/compute, and any other connection info"
+    type: string
+
+  - name: query_tool
+    description: "The working query tool script at utilities/[datasource_name]_query_tool.py"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read utilities/sql_query_tool_template.py to understand the base template.
+        Read .deepwork/tmp/connect_test_results.md to verify the tool was tested successfully.
+
+        Verify:
+        - Working Connectivity: The test results file shows successful query execution against the data source.
+        - Template Compliance: The query tool follows the structure of sql_query_tool_template.py, only modifying the connection section above the divider line.
+        - Platform Tooling: If the platform has useful CLI tools (e.g., databricks cli), they have been identified and documented.
+
+  - name: connect_test_results
+    description: "Log of connectivity test results showing the tool works"
+    type: file_path
+
+  - name: datasource_directory
+    description: "The datasources/[datasource_name]/README.md file confirming the directory structure is set up"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read doc/system_prompt_experimentation/file_structure.md for the expected directory conventions.
+        Read .deepwork/tmp/populate_schema_summary.md to understand what was explored vs deferred.
+
+        Verify:
+        - Directory Structure: The datasources/[name]/ directory follows the conventions in file_structure.md (README.md, catalog/tables/ hierarchy).
+        - Schema Coverage: All catalog entries are accounted for — either explored via explore_schema or explicitly deferred with explanation.
+        - User Involvement: If the catalog was large, the user was asked which schemas to focus on.
+
+  - name: populate_schema_summary
+    description: "Summary of what schemas were found, which were explored, and which were deferred"
+    type: file_path
+
+  - name: reference_queries
+    description: "Reference query files placed in queries/reference/ following the standard query file format"
+    type: file_path
+
+  - name: sleuthing_findings
+    description: "Summary of all sources checked, what was found, and where info was placed. All findings cite their source."
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Verify:
+        - Source Citations: Every finding cites where it was extracted from (e.g., dbt model name, Genie space, semantic layer definition).
+        - Comprehensive Search: Multiple potential sources were checked (semantic layers, dbt, query history, platform-specific features like Genie/Cortex).
+        - Actionable Output: The reference queries and enriched docs are useful for someone querying this data source.
+
+  - name: schema_path
+    description: "The catalog/schema path to explore (e.g., 'main.sales' or 'analytics')"
+    type: string
+
+  - name: query_tool_path
+    description: "Path to the query tool script (e.g., utilities/my_source_query_tool.py)"
+    type: string
+
+  - name: table_docs
+    description: "Markdown files for each table at datasources/[name]/catalog/tables/[schema_path]/[table].md"
+    type: file_path
+    review:
+      strategy: individual
+      instructions: |
+        Read doc/system_prompt_experimentation/file_structure.md for the expected table doc format.
+
+        Verify:
+        - Catalog Info: The doc includes any available semantic info (description, tags) from the catalog.
+        - Column Documentation: All columns are listed with their data types, and include basic stats (nulls, min/max) where available.
+        - Type Classification: The table is classified by type (raw, dimensional, analytical, etc.) with reasoning based on lineage or naming.
+
+  - name: schema_readme
+    description: "README.md for the schema directory summarizing the tables and their relationships"
+    type: file_path
+
+  - name: key_tables
+    description: "datasources/[datasource_name]/key_tables.md identifying the most important tables and why"
+    type: file_path
+
+workflows:
+  onboard_datasource:
+    summary: "Connect to a new data source, explore its schema, and document it"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      A workflow for connecting to new data sources and building comprehensive local documentation
+      of their schemas, tables, and semantic context. Designed for analysts who need to understand
+      and work with enterprise data platforms (Databricks, Snowflake, etc.).
+
+      The onboard_datasource workflow handles the full lifecycle:
+      1. Creates a working query tool by adapting the SQL query tool template
+      2. Navigates the data source catalog to build out the datasources/ directory structure
+      3. Sleuths for higher-level context: semantic layers, dbt models, Genie/Cortex definitions,
+         and reference queries
+
+      The explore_schema workflow is a reusable sub-workflow that populates a specific schema
+      directory with per-table documentation and synthesized READMEs. It can be invoked standalone
+      to update or expand existing datasource documentation.
+
+      ## Output Behavior
+      Minimize chat messages. Maximize file output. All substantive work product belongs in files,
+      not in conversation. Do not echo back table lists, column details, query results, or
+      documentation content as chat messages — write them directly to files. Chat messages should
+      be limited to: brief status updates, errors or decisions that need user input, and a final
+      one-line summary. Sub-agents should also follow this rule.
+
+      All outputs follow the file structure conventions in doc/system_prompt_experimentation/file_structure.md:
+      - Query tools go in utilities/
+      - Datasource docs go in datasources/[source_name]/
+      - Reference queries go in queries/reference/
+    steps:
+      - name: connect
+        instructions: |
+          # Connect to Data Source
+
+          ## Objective
+
+          Create a working SQL query tool for the data source by adapting `utilities/sql_query_tool_template.py`, then verify connectivity through iterative testing.
+
+          ## Task
+
+          Build a functional query tool that can execute SQL against the target data source. This is the foundational step — nothing else works until this tool can successfully connect and return results.
+
+          ### Process
+
+          1. **Gather connection details**
+
+             Ask structured questions to collect all necessary connection information from the user. The exact questions depend on the platform type, but typically include:
+
+             - **Platform type**: Databricks, Snowflake, BigQuery, Postgres, MySQL, etc.
+             - **Server/host**: The endpoint URL or hostname
+             - **Authentication method**: OAuth, token, username/password, service account, etc.
+             - **Catalog/database**: The default catalog or database to connect to
+             - **Warehouse/compute**: For platforms like Databricks (HTTP path) or Snowflake (warehouse name)
+             - **Any additional connection parameters**: SSL settings, port, schema, etc.
+
+             If any required information is unclear or missing, ask structured questions to clarify. Do not guess at connection parameters.
+
+          2. **Create the query tool**
+
+             Read `utilities/sql_query_tool_template.py` to understand the template structure. Then create `utilities/[datasource_name]_query_tool.py` by:
+
+             - Copying the template
+             - Updating the connection constants for the target platform
+             - Adjusting the `create_query_engine()` function for the appropriate SQLAlchemy dialect
+             - Adding the correct `ENGINE_KWARGS` for the authentication method
+             - Updating the imports as needed (e.g. different OAuth or driver modules)
+
+             **Platform-specific SQLAlchemy dialects:**
+             - Databricks: `databricks://` (requires `databricks-sql-connector`)
+             - Snowflake: `snowflake://` (requires `snowflake-sqlalchemy`)
+             - BigQuery: `bigquery://` (requires `sqlalchemy-bigquery`)
+             - Postgres: `postgresql://` (requires `psycopg2`)
+             - MySQL: `mysql+pymysql://` (requires `pymysql`)
+
+          3. **Install required dependencies**
+
+             Install the SQLAlchemy dialect driver and any other required packages. Use `uv pip install` for installation. Document what was installed.
+
+          4. **Test connectivity iteratively**
+
+             Run a simple test query to verify the tool works:
+
+             Create a minimal test query file (e.g., in `.deepwork/tmp/test_query.md`) and execute it with the new tool. Start with the simplest possible query:
+             - `SELECT 1` or equivalent for the platform
+             - Then try `SHOW SCHEMAS`, `SHOW TABLES`, or equivalent catalog introspection queries
+
+             See `utilities/HOW_TO_QUERY.md` for full query tool usage including
+             multi-file execution, `--validate`, `--explain`, and running
+             long-running queries as background processes.
+
+             If the test fails:
+             - Read the error message carefully
+             - Ask structured questions if the error suggests a configuration issue (wrong host, auth problem, missing permissions)
+             - Fix the query tool and retry
+             - Repeat until a successful query is confirmed
+
+             Record all test attempts and their results in `.deepwork/tmp/connect_test_results.md`.
+
+          5. **Check for platform CLI tools**
+
+             For platforms that have useful CLI tools beyond SQL:
+             - **Databricks**: The `databricks` CLI can browse the Unity Catalog, manage volumes, and access features not available via SQL
+             - **Snowflake**: The `snow` CLI can manage stages, tasks, and other objects
+             - **BigQuery**: The `bq` CLI provides dataset management and job control
+
+             If a CLI tool would be useful:
+             - Install it (e.g., `uv pip install databricks-cli`)
+             - Add a comment block at the top of the query tool file documenting the CLI tool, how to authenticate it, and example commands
+             - Test that it works with a basic command
+
+          ## Output Format
+
+          ### utilities/[datasource_name]_query_tool.py
+
+          A Python script following the template structure.
+
+          **Structure**:
+          ```python
+          #!/usr/bin/env python3
+          """SQL Query Tool — [Platform Name] ([Auth Method])
+
+          [Brief description of what this tool connects to and how auth works.]
+
+          Usage:
+              ./utilities/[datasource_name]_query_tool.py query.md
+              ./utilities/[datasource_name]_query_tool.py q1.md q2.md   # multiple files
+              ./utilities/[datasource_name]_query_tool.py --help
+
+          # Additional CLI Tools
+          # --------------------
+          # [If applicable, document platform CLI tools here]
+          # Install: uv pip install [package]
+          # Auth: [how to authenticate]
+          # Example commands:
+          #   [command 1] — [what it does]
+          #   [command 2] — [what it does]
+          """
+
+          from unsupervised.lib.sql_query_tool_lib import main
+
+          # ... [connection constants and engine setup, modified for this data source]
+
+          def create_query_engine():
+              # ... [return a SQLAlchemy engine for this data source]
+
+          if __name__ == "__main__":
+              main(create_query_engine)
+          ```
+
+          ### .deepwork/tmp/connect_test_results.md
+
+          A log of all connectivity test attempts.
+
+          **Structure**:
+          ```markdown
+          # Connect Test Results: [datasource_name]
+
+          ## Connection Details
+          - **Platform**: [platform_type]
+          - **Host**: [server endpoint]
+          - **Auth**: [authentication method]
+          - **Catalog/Database**: [default catalog]
+          - **Date**: [current date]
+
+          ## Dependencies Installed
+          - [package_name] [version]
+          - [package_name] [version]
+
+          ## Test Attempts
+
+          ### Attempt 1
+          - **Query**: `SELECT 1`
+          - **Result**: [SUCCESS/FAILURE]
+          - **Output/Error**: [details]
+
+          ### Attempt N (final successful)
+          - **Query**: `SHOW SCHEMAS IN [catalog]`
+          - **Result**: SUCCESS
+          - **Output**: [schema list or summary]
+          - **Row Count**: [N]
+
+          ## CLI Tools
+          - **[tool_name]**: Installed and tested / Not applicable
+            - Test command: `[command]`
+            - Result: [output summary]
+          ```
+
+          ## Context
+
+          This is the first step in onboarding a new data source. The query tool created here will be used by all subsequent steps (populate_schema, explore_tables, sleuthing) to interact with the data source. Getting this right is critical — an unreliable connection will cause cascading failures downstream. Take the time to test thoroughly and document clearly.
+        inputs:
+          datasource_name: {}
+          platform_type: {}
+          connection_details: {}
+        outputs:
+          query_tool:
+            required: true
+          connect_test_results:
+            required: true
+        process_requirements:
+          "Working Connectivity": "The test results file MUST show successful query execution against the data source."
+          "Template Compliance": "The query tool MUST follow the structure of sql_query_tool_template.py, only modifying the connection section above the divider line."
+          "Platform Tooling": "If the platform has useful CLI tools (e.g., databricks cli), they SHOULD be identified and documented."
+
+      - name: populate_schema
+        instructions: |
+          # Populate Schema Directory
+
+          ## Objective
+
+          Navigate the data source catalog to build out the `datasources/[datasource_name]/` directory structure, then launch `explore_schema` sub-workflows to populate each schema with table-level documentation.
+
+          ## Task
+
+          Use the query tool from the connect step to introspect the data source's catalog structure, create the directory hierarchy, and orchestrate parallel schema exploration.
+
+          ### Process
+
+          1. **Identify the query tool**
+
+             Locate the query tool created in the connect step (e.g., `utilities/[datasource_name]_query_tool.py`). Verify it exists and is functional.
+
+          2. **Introspect the catalog**
+
+             Run catalog introspection queries to discover all top-level entries (schemas, databases, or equivalent). The exact queries depend on the platform:
+
+             - **Databricks**: `SHOW SCHEMAS IN [catalog]` or use the Unity Catalog CLI
+             - **Snowflake**: `SHOW SCHEMAS IN DATABASE [database]`
+             - **Postgres**: `SELECT schema_name FROM information_schema.schemata`
+             - **BigQuery**: `SELECT schema_name FROM INFORMATION_SCHEMA.SCHEMATA`
+
+             For each schema found, also check the number of tables/views:
+             - `SHOW TABLES IN [schema]` or equivalent
+             - Record the table count per schema
+
+          3. **Assess catalog complexity**
+
+             Evaluate whether the catalog is large or manageable:
+
+             **Signs the catalog is large/complex:**
+             - More than ~10 top-level entries
+             - Schema names that are unclear or ambiguous (e.g., `schema_v2`, `test_123`, `backup_old`)
+             - Multiple schemas that appear to contain the same conceptual tables
+             - Total table count across all schemas exceeds ~100
+
+             **Signs the catalog is manageable:**
+             - Fewer than ~10 top-level entries
+             - Schema names are clear and descriptive (e.g., `sales`, `marketing`, `raw_events`)
+             - Each schema has a distinct purpose
+
+          4. **Create the directory structure**
+
+             Create the base directory at `datasources/[datasource_name]/` with:
+             - `README.md` — placeholder with data source name and connection summary
+             - `key_tables.md` — placeholder (will be populated later by orient step)
+             - `catalog/tables/` — directory for table documentation
+
+             For each schema discovered, create:
+             - `catalog/tables/[schema_name]/` — directory for that schema's tables
+             - `catalog/tables/[schema_name]/README.md` — placeholder noting the schema exists but is not yet explored
+
+          5. **Handle large vs. manageable catalogs**
+
+             **If the catalog is large/complex:**
+             - Create placeholder directories for ALL schemas with READMEs explaining they haven't been explored
+             - Ask structured questions to the user about which schemas to focus on, presenting:
+               - The schema names and table counts
+               - Your assessment of which seem most important based on naming
+               - A recommendation for which to start with
+             - Only proceed with explore_schema for user-selected schemas
+
+             **If the catalog is manageable:**
+             - Create placeholder directories for all schemas
+             - Proceed to explore all of them
+
+          6. **Launch explore_schema sub-workflows**
+
+             For each schema to be explored, launch the `explore_schema` workflow as a sub-workflow using the DeepWork MCP tools:
+
+             ```
+             Call mcp__plugin_deepwork_deepwork__start_workflow with:
+               - goal: "Explore and document all tables in [schema_name] schema of [datasource_name]"
+               - job_name: datasource_management
+               - workflow_name: explore_schema
+               - instance_id: [datasource_name]-[schema_name]
+             ```
+
+             Since each schema is independent, launch these in parallel using sub-agents (Task tool). Each sub-agent should:
+             - Start the explore_schema workflow for its assigned schema
+             - Follow the workflow steps (explore_tables, then orient)
+             - Complete the workflow
+
+             Wait for all sub-workflows to complete before proceeding.
+
+          7. **Create the summary**
+
+             Write `.deepwork/tmp/populate_schema_summary.md` documenting:
+             - All schemas discovered
+             - Which were explored and which were deferred
+             - Reasons for deferral
+             - Table counts per schema
+             - Any notable findings during exploration
+
+          ## Output Format
+
+          ### datasources/[datasource_name]/README.md
+
+          The top-level datasource README.
+
+          **Structure**:
+          ```markdown
+          # [Datasource Name]
+
+          ## Connection
+          - **Platform**: [platform_type]
+          - **Host**: [server endpoint]
+          - **Query Tool**: `utilities/[datasource_name]_query_tool.py`
+          - **Default Catalog**: [catalog name]
+
+          ## Schemas
+
+          | Schema | Tables | Status | Notes |
+          |--------|--------|--------|-------|
+          | [schema_1] | [count] | Explored | [brief note] |
+          | [schema_2] | [count] | Explored | [brief note] |
+          | [schema_3] | [count] | Deferred | [reason] |
+
+          ## Overview
+
+          [High-level description of what this data source contains and how it is organized.
+          This section should be updated as understanding deepens.]
+          ```
+
+          ### .deepwork/tmp/populate_schema_summary.md
+
+          Summary of the exploration process.
+
+          **Structure**:
+          ```markdown
+          # Schema Population Summary: [datasource_name]
+
+          ## Date
+          [current date]
+
+          ## Catalog Overview
+          - **Total schemas found**: [N]
+          - **Schemas explored**: [N]
+          - **Schemas deferred**: [N]
+          - **Total tables across all schemas**: [N]
+
+          ## Schema Details
+
+          ### Explored Schemas
+          | Schema | Table Count | Sub-workflow Status |
+          |--------|------------|-------------------|
+          | [name] | [count] | Completed |
+
+          ### Deferred Schemas
+          | Schema | Table Count | Reason for Deferral |
+          |--------|------------|-------------------|
+          | [name] | [count] | [reason] |
+
+          ## User Decisions
+          [If applicable, note which schemas the user chose to focus on and why]
+
+          ## Issues Encountered
+          [Any problems during exploration]
+          ```
+
+          ## Context
+
+          This is the bridging step between establishing connectivity and having useful documentation. It serves two purposes: (1) creating the directory scaffolding that all future documentation will live in, and (2) orchestrating the detailed exploration of each schema. The explore_schema sub-workflow handles the table-by-table work; this step handles the catalog-level decisions about what to explore.
+        inputs:
+          query_tool: {}
+        outputs:
+          datasource_directory:
+            required: true
+          populate_schema_summary:
+            required: true
+        process_requirements:
+          "Directory Structure": "The datasources/[name]/ directory MUST follow the conventions in file_structure.md (README.md, catalog/tables/ hierarchy)."
+          "Schema Coverage": "All catalog entries MUST be accounted for — either explored via explore_schema or explicitly deferred with explanation."
+          "User Involvement": "If the catalog was large, the user SHOULD have been asked which schemas to focus on."
+
+      - name: sleuthing
+        instructions: |
+          # Sleuth for Semantic Context
+
+          ## Objective
+
+          Search the data platform for semantic layers, reference queries, dbt models, and other higher-level context that can enrich the datasource documentation and provide vetted example queries.
+
+          ## Task
+
+          Go beyond raw schema introspection to find curated, human-authored context about the data. This step looks for things like semantic model definitions, sample queries, dbt documentation, and other metadata that reflects how the data is actually used.
+
+          ### Process
+
+          1. **Review what was documented**
+
+             Read the `datasources/[datasource_name]/README.md` and browse the table docs created by populate_schema/explore_schema to understand what has already been documented. This gives you context for what to look for and where to place findings.
+
+          2. **Check for platform-specific semantic features**
+
+             Different platforms have different sources of curated context. Check each one that applies:
+
+             **Databricks:**
+             - **Unity Catalog tags and comments**: `SELECT * FROM system.information_schema.table_tags` or column comments/descriptions
+             - **Genie Spaces**: Check if there are Genie data rooms defined. If the Databricks CLI is available, use it to list and inspect Genie spaces. Extract sample questions and their SQL translations.
+             - **AI/BI Dashboards**: Look for published dashboards that reference the documented tables
+             - **Delta Sharing**: Check for any shared datasets
+
+             **Snowflake:**
+             - **Cortex Analyst semantic models**: Check for semantic model YAML definitions
+             - **Snowflake Marketplace**: Note any marketplace datasets in use
+             - **Dynamic Tables**: These represent transformation logic worth documenting
+             - **Tasks and Streams**: These reveal data pipeline patterns
+
+             **BigQuery:**
+             - **Dataset descriptions**: Check dataset-level descriptions
+             - **Authorized views**: These reveal important data access patterns
+             - **Scheduled queries**: These are reference queries by definition
+
+             **General (all platforms):**
+             - **Views**: Views represent curated queries. Document significant ones.
+             - **Stored procedures/functions**: These encode business logic
+             - **Query history**: If accessible, look for frequently-run queries on the documented tables (use system views like `system.query.history` on Databricks or `INFORMATION_SCHEMA.JOBS` on BigQuery)
+
+          3. **Check for dbt models**
+
+             Look for signs of dbt usage:
+             - Tables/views with names following dbt conventions (`stg_`, `int_`, `fct_`, `dim_`)
+             - Check if there is a dbt project accessible (ask the user if unsure)
+             - If dbt models exist, extract:
+               - Model descriptions from `schema.yml` or `properties.yml`
+               - Column descriptions and tests
+               - Source definitions
+               - Documentation blocks
+             - Cite the exact dbt file path for each piece of information extracted
+
+          4. **Extract and create reference queries**
+
+             For any useful queries found (from Genie, Cortex, views, query history, dbt, etc.), create reference query files in `queries/reference/` following the standard query file format documented in `utilities/HOW_TO_QUERY.md`. Include the origin in the description (e.g., "sourced from Genie space 'Sales Analytics'").
+
+             Name query files descriptively: `queries/reference/[datasource]_[purpose].md`
+
+          5. **Enrich existing datasource docs**
+
+             When semantic info is found that relates to already-documented tables:
+             - Add it to the relevant table's markdown file under a `## Semantic Context` section
+             - Always cite the source (e.g., "From Genie space 'Sales Analytics'", "From dbt model stg_orders.sql")
+
+          6. **Document findings**
+
+             Write `.deepwork/tmp/sleuthing_findings.md` summarizing everything that was checked, found, and where it was placed.
+
+          ## Output Format
+
+          ### queries/reference/[datasource]_[purpose].md
+
+          Standard query files with YAML frontmatter.
+
+          **Structure**:
+          ```yaml
+          ---
+          sql: |
+            SELECT
+              date_trunc('month', order_date) AS month,
+              COUNT(*) AS order_count,
+              SUM(total_amount) AS revenue
+            FROM sales.orders
+            GROUP BY 1
+            ORDER BY 1
+          output: body
+          description: "Monthly order count and revenue summary. Sourced from Genie space 'Sales Analytics' sample question 'Show monthly revenue trends'."
+          applicable_reference_files:
+            - datasources/[datasource_name]/catalog/tables/sales/orders.md
+          ---
+          ```
+
+          ### .deepwork/tmp/sleuthing_findings.md
+
+          Comprehensive summary of the sleuthing process.
+
+          **Structure**:
+          ```markdown
+          # Sleuthing Findings: [datasource_name]
+
+          ## Date
+          [current date]
+
+          ## Sources Checked
+
+          ### [Source Category] (e.g., "Semantic Layer", "dbt", "Query History")
+          - **Checked**: [what was looked for]
+          - **Found**: [what was discovered, or "Nothing found"]
+          - **Action Taken**: [where info was placed]
+          - **Source Citation**: [exact origin, e.g., "Genie space 'Sales Analytics', question ID 42"]
+
+          ### [Next Source Category]
+          ...
+
+          ## Reference Queries Created
+          | File | Description | Source |
+          |------|------------|--------|
+          | queries/reference/[file].md | [description] | [origin] |
+
+          ## Datasource Docs Enriched
+          | Table Doc | Info Added | Source |
+          |-----------|-----------|--------|
+          | datasources/[name]/catalog/tables/[path].md | [what was added] | [origin] |
+
+          ## Sources Not Available
+          [List any sources that could not be checked and why, e.g., "Query history: insufficient permissions on system.query.history"]
+
+          ## Recommendations
+          [Suggestions for additional context that could be gathered manually or with different permissions]
+          ```
+
+          ## Context
+
+          This is the final step in onboarding a data source. The previous steps created the mechanical documentation (schema structure, table columns, data types). This step adds the human layer — the curated knowledge that reflects how people actually use and think about the data. Reference queries are particularly valuable because they serve as starting points for future analysis and as examples of correct query patterns for this data source. Always cite sources so findings can be verified and updated over time.
+        inputs:
+          datasource_directory: {}
+        outputs:
+          reference_queries:
+            required: false
+          sleuthing_findings:
+            required: true
+
+  explore_schema:
+    summary: "Populate or update table-level documentation for a datasource schema directory"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      A workflow for connecting to new data sources and building comprehensive local documentation
+      of their schemas, tables, and semantic context. Designed for analysts who need to understand
+      and work with enterprise data platforms (Databricks, Snowflake, etc.).
+
+      The explore_schema workflow is a reusable sub-workflow that populates a specific schema
+      directory with per-table documentation and synthesized READMEs. It can be invoked standalone
+      to update or expand existing datasource documentation.
+
+      ## Output Behavior
+      Minimize chat messages. Maximize file output. All substantive work product belongs in files,
+      not in conversation. Do not echo back table lists, column details, query results, or
+      documentation content as chat messages — write them directly to files. Chat messages should
+      be limited to: brief status updates, errors or decisions that need user input, and a final
+      one-line summary. Sub-agents should also follow this rule.
+
+      All outputs follow the file structure conventions in doc/system_prompt_experimentation/file_structure.md:
+      - Query tools go in utilities/
+      - Datasource docs go in datasources/[source_name]/
+      - Reference queries go in queries/reference/
+    steps:
+      - name: explore_tables
+        instructions: |
+          # Explore Tables
+
+          ## Objective
+
+          Document every table in a given schema by running parallel sub-agents that each produce a detailed markdown file with catalog info, lineage, type classification, and column statistics.
+
+          ## Task
+
+          Use the query tool to enumerate all tables in the target schema, then launch parallel sub-agents to document each table individually. Each sub-agent produces a markdown file at `datasources/[datasource_name]/catalog/tables/[schema_path]/[table_name].md`.
+
+          ### Process
+
+          1. **Enumerate tables in the schema**
+
+             Use the query tool to list all tables and views in the target schema.
+             See `utilities/HOW_TO_QUERY.md` for full usage including multi-file
+             execution and running long-running queries as background processes.
+
+             Platform-specific enumeration queries:
+
+             - **Databricks**: `SHOW TABLES IN [catalog].[schema]`
+             - **Snowflake**: `SHOW TABLES IN SCHEMA [database].[schema]`
+             - **Postgres**: `SELECT table_name FROM information_schema.tables WHERE table_schema = '[schema]'`
+             - **BigQuery**: `SELECT table_name FROM [dataset].INFORMATION_SCHEMA.TABLES`
+
+             Record the full list of tables and their types (TABLE, VIEW, MATERIALIZED VIEW, etc.).
+
+          2. **Gather catalog-level metadata for each table**
+
+             Before launching sub-agents, batch-query catalog metadata that is more efficient to collect in bulk:
+
+             - Table descriptions/comments: `SELECT * FROM information_schema.tables WHERE table_schema = '[schema]'`
+             - Column info: `SELECT * FROM information_schema.columns WHERE table_schema = '[schema]'`
+             - Any tags or labels available in the catalog
+
+             This avoids each sub-agent making redundant catalog queries.
+
+          3. **Launch parallel sub-agents (max 5 at a time)**
+
+             For each table, launch a sub-agent using the Task tool. **Launch one sub-agent per table, but run no more than 5 sub-agents in parallel at a time.** Wait for a batch of up to 5 to complete before launching the next batch.
+
+             Each sub-agent should receive the following instructions:
+
+             Each sub-agent should:
+
+             **a. Get column details**
+             Using the pre-fetched catalog info (passed to the sub-agent), document each column:
+             - Column name
+             - Data type
+             - Nullable (yes/no)
+             - Description/comment from catalog (if available)
+
+             **b. Collect basic statistics**
+             Run a single query to get stats for all columns efficiently. Adapt the approach based on table size:
+
+             For tables with reasonable size (< ~1M rows):
+             ```sql
+             SELECT
+               COUNT(*) as row_count,
+               COUNT(DISTINCT [col]) as [col]_distinct,
+               SUM(CASE WHEN [col] IS NULL THEN 1 ELSE 0 END) as [col]_nulls,
+               MIN([col]) as [col]_min,
+               MAX([col]) as [col]_max
+             FROM [schema].[table]
+             ```
+
+             For large tables, use sampling or approximate functions:
+             - `TABLESAMPLE` if supported
+             - `APPROX_COUNT_DISTINCT` if available
+             - Or just get row count and null counts
+
+             For common/frequent values, only collect if efficient:
+             - Use `APPROX_TOP_K` if available (Databricks)
+             - Or `SELECT [col], COUNT(*) ... GROUP BY 1 ORDER BY 2 DESC LIMIT 5` for low-cardinality columns only
+             - Skip this for high-cardinality columns (distinct count > 100)
+
+             **c. Investigate lineage and type**
+             Determine how the table is created/maintained:
+             - Is it a VIEW? → Read the view definition (`SHOW CREATE TABLE` or equivalent)
+             - Does the name suggest a pattern? (`stg_` = staging, `dim_` = dimension, `fct_` = fact, `raw_` = raw)
+             - Is it managed or external?
+             - When was it last modified? (`DESCRIBE DETAIL` on Databricks, table metadata elsewhere)
+
+             Classify the table as one of:
+             - **Raw/Landing**: Ingested data with minimal transformation
+             - **Staging**: Cleaned/renamed raw data (often prefixed `stg_`)
+             - **Dimensional**: Reference/lookup table (prefixed `dim_` or contains master data)
+             - **Fact**: Event/transaction table (prefixed `fct_` or contains timestamped records)
+             - **Aggregate/Mart**: Pre-aggregated analytical table
+             - **Analytical/Ad-hoc**: One-off analytical table, possibly stale
+             - **System/Internal**: Platform-managed metadata table
+             - **Unknown**: Cannot determine with available information
+
+             **d. Determine the logical primary key**
+             Identify the column or combination of columns that uniquely identifies each row:
+             - Check for database-enforced primary key constraints (e.g., `DESCRIBE TABLE EXTENDED`, `SHOW KEYS`, or `information_schema.table_constraints`). If one exists, use it — but enforced PKs are rare in warehouses.
+             - Look for a single column with distinct count equal to row count and zero nulls — that's a strong natural key candidate.
+             - If no single column is unique, look for a composite key: a combination of columns whose joint distinct count equals the row count (e.g., `(order_id, line_number)` or `(date, customer_id, product_id)`).
+             - Use naming conventions as hints: columns named `*_id`, `*_key`, or `*ID` are common key candidates.
+             - The primary key is the **logical** one — the column(s) that define the grain of the table. There does not need to be an actual database-enforced constraint for it to be the logical primary key, though if an enforced constraint exists it is usually the logical key too.
+             - If truly ambiguous, do a `select count(distinct col1), count(distinct col2), count(distinct col1, col2) from table` for the most likely key candidates. If `count(distinct col1, col2) == row_count`, then `(col1, col2)` is the primary key. If not, try the next pair and repeat. If after trying all pairs it is still ambiguous, explain in the primary key section that it is ambiguous and why.
+
+             **e. Write the table doc**
+             Create the markdown file at `datasources/[datasource_name]/catalog/tables/[schema_path]/[table_name].md`.
+
+          4. **Collect results**
+
+             After all sub-agents complete, verify that a markdown file was created for each table. Report any failures.
+
+          ## Output Format
+
+          ### datasources/[datasource_name]/catalog/tables/[schema_path]/[table_name].md
+
+          Per-table documentation.
+
+          **Structure**:
+          ```markdown
+          # [table_name]
+
+          **Schema**: [full_schema_path]
+          **Type**: [TABLE / VIEW / MATERIALIZED VIEW]
+          **Classification**: [Raw | Staging | Dimensional | Fact | Aggregate | Analytical | System | Unknown]
+          **Primary Key**: [column_name | (col1, col2) for composite keys | "Likely: column_name" if uncertain | "Unknown" if not determinable]
+          **Row Count**: [approximate or exact count]
+          **Last Modified**: [date if available]
+
+          ## Description
+
+          [Catalog description if available, otherwise "No description in catalog."]
+
+          ## Lineage
+
+          [How this table is created/maintained:]
+          - [If a view: "Defined as a view over [source tables]"]
+          - [If staging: "Appears to be a staging layer over [raw source]"]
+          - [If unknown: "Lineage could not be determined from available metadata"]
+
+          ## Columns
+
+          | Column | Type | Nullable | Nulls | Distinct | Min | Max | Description |
+          |--------|------|----------|-------|----------|-----|-----|-------------|
+          | [col1] | [type] | [Y/N] | [count or %] | [count] | [val] | [val] | [catalog desc] |
+          | [col2] | [type] | [Y/N] | [count or %] | [count] | [val] | [val] | [catalog desc] |
+
+          ## Common Values
+
+          [Only for low-cardinality columns where this was efficiently obtainable]
+
+          ### [column_name]
+          | Value | Count |
+          |-------|-------|
+          | [val1] | [count] |
+          | [val2] | [count] |
+
+          ## Notes
+
+          [Any additional observations about the table:]
+          - [Naming patterns observed]
+          - [Potential relationships to other tables (shared column names)]
+          - [Data quality observations (high null rates, suspicious ranges)]
+          ```
+
+          ## Context
+
+          This step does the detailed, per-table work of data source documentation. It runs as part of the explore_schema workflow, which is typically launched as a sub-workflow from populate_schema during onboarding. It can also be re-run standalone to update documentation for a schema that has changed. The table docs produced here are the foundation for the orient step, which synthesizes them into higher-level READMEs. Prioritize completeness over perfection — a table doc with basic stats is far more useful than no doc at all.
+        inputs:
+          datasource_name: {}
+          schema_path: {}
+          query_tool_path: {}
+        outputs:
+          table_docs:
+            required: true
+
+      - name: orient
+        instructions: |
+          # Orient and Synthesize
+
+          ## Objective
+
+          Build READMEs at schema and catalog directory levels by synthesizing relationships and patterns across the table documentation created by explore_tables.
+
+          ## Task
+
+          Read all the table markdown files produced by the explore_tables step, identify relationships and patterns between tables, and produce high-level documentation that helps someone new to the schema understand its purpose and structure.
+
+          ### Process
+
+          1. **Read all table documentation**
+
+             Read every table markdown file in `datasources/[datasource_name]/catalog/tables/[schema_path]/`. For each table, extract:
+             - Table name and classification
+             - Column names and types
+             - Row counts
+             - Any lineage information
+             - Description from catalog
+
+          2. **Identify relationships**
+
+             Look for connections between tables:
+
+             - **Foreign key patterns**: Columns with matching names across tables (e.g., `customer_id` in both `orders` and `customers`)
+             - **Naming conventions**: Tables that share prefixes or suffixes suggesting they belong to the same domain (e.g., `sales_orders`, `sales_returns`, `sales_items`)
+             - **Lineage chains**: Views or staging tables that reference other tables
+             - **Dimension-fact relationships**: Dimensional tables that are likely joined to fact tables based on shared key columns
+             - **Temporal patterns**: Tables that represent different time granularities of the same data
+
+          3. **Identify domain groupings**
+
+             Group tables by business domain or functional area:
+             - Which tables relate to customers?
+             - Which relate to products?
+             - Which relate to transactions/events?
+             - Which are reference/lookup tables?
+             - Which appear to be unused, stale, or redundant?
+
+          4. **Write the schema README**
+
+             Create or update `datasources/[datasource_name]/catalog/tables/[schema_path]/README.md` with a synthesized view of the schema.
+
+          5. **Write key_tables.md**
+
+             Create or update `datasources/[datasource_name]/key_tables.md` identifying the most important tables in this schema. A table is "key" if it is:
+             - Central to many relationships (highly referenced by other tables)
+             - A primary fact table capturing core business events
+             - A master dimension table used across many queries
+             - The main entry point for a common analytical question
+
+          ## Output Format
+
+          ### datasources/[datasource_name]/catalog/tables/[schema_path]/README.md
+
+          Schema-level README synthesizing the tables.
+
+          **Structure**:
+          ```markdown
+          # [Schema Name]
+
+          ## Purpose
+
+          [1-2 paragraph description of what this schema contains and its role in the data platform.
+          Synthesized from the individual table descriptions and naming patterns.]
+
+          ## Domain Map
+
+          ### [Domain 1, e.g., "Customer Data"]
+          Tables related to [domain description]:
+          - **[table_name]** ([classification]) — [one-line description]
+          - **[table_name]** ([classification]) — [one-line description]
+
+          ### [Domain 2, e.g., "Order Processing"]
+          ...
+
+          ## Key Relationships
+
+          ```
+          [Simple ASCII diagram or list showing primary relationships]
+
+          customers ---< orders ---< order_items >--- products
+                          |
+                          v
+                      shipments
+          ```
+
+          - `orders.customer_id` -> `customers.id` (many-to-one)
+          - `order_items.order_id` -> `orders.id` (many-to-one)
+          - `order_items.product_id` -> `products.id` (many-to-one)
+
+          ## Table Summary
+
+          | Table | Classification | Rows | Description |
+          |-------|---------------|------|-------------|
+          | [name] | [type] | [count] | [brief desc] |
+
+          ## Data Flow
+
+          [If lineage info is available, describe the general data flow:]
+          1. Raw data lands in [raw tables]
+          2. Staging tables ([stg_ tables]) clean and standardize
+          3. Dimensional tables ([dim_ tables]) provide reference data
+          4. Fact tables ([fct_ tables]) capture business events
+
+          ## Notes
+
+          - [Any observations about schema organization]
+          - [Data quality patterns noticed across tables]
+          - [Tables that may be stale or deprecated]
+          ```
+
+          ### datasources/[datasource_name]/key_tables.md
+
+          The most important tables with justification.
+
+          **Structure**:
+          ```markdown
+          # Key Tables: [Datasource Name]
+
+          ## Overview
+
+          [Brief explanation of how key tables were selected and what makes a table "key" in this context.]
+
+          ## Key Tables
+
+          ### [table_name]
+          - **Schema**: [schema_path]
+          - **Classification**: [type]
+          - **Why Key**: [Explanation of why this table is important — e.g., "Central fact table for all customer orders. Referenced by 5 other tables. Contains 2.3M rows spanning 3 years of transaction data."]
+          - **Common Joins**: [What it's typically joined with]
+          - **Primary Grain**: [What one row represents]
+
+          ### [next_table]
+          ...
+
+          ## Quick Reference
+
+          | Table | Schema | Why Key | Grain |
+          |-------|--------|---------|-------|
+          | [name] | [schema] | [brief reason] | [what one row is] |
+          ```
+
+          ## Context
+
+          This is the synthesis step that turns individual table documentation into a navigable, understandable data source. The explore_tables step documents each tree; this step describes the forest. The key_tables.md file is particularly important because it tells analysts where to start when they have a question — rather than scanning dozens of table files, they can start with the key tables and follow relationships from there.
+        inputs:
+          table_docs: {}
+        outputs:
+          schema_readme:
+            required: true
+          key_tables:
+            required: true
+        process_requirements:
+          "Accurate Synthesis": "The README MUST accurately describe the relationships between tables based on the actual table docs."
+          "Key Tables Justified": "key_tables.md MUST explain why each table is considered key, not just listing names."
+          "Navigability": "Someone new to this schema MUST be able to understand its purpose and structure from reading just the README."

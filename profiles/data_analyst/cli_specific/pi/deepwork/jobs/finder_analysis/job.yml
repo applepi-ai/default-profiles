@@ -1,0 +1,950 @@
+name: finder_analysis
+summary: "Run the finder pattern discovery pipeline on exported data and produce a draft report"
+
+step_arguments:
+  - name: datasource
+    description: "The datasource to query (e.g., 'databricks_telco'). Must have a query tool in utilities/."
+    type: string
+  - name: analysis_goal
+    description: "What data to export — the KPI to analyze and what columns/tables to include. The agent should consult datasource docs to find relevant columns and joinable tables."
+    type: string
+  - name: data_dir
+    description: "The finder working directory path finder/{stem}/ containing data.parquet and schema.txt"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Verify the finder working directory:
+        - The parquet file MUST exist at finder/{stem}/data.parquet.
+        - The schema output MUST be saved at finder/{stem}/schema.txt.
+  - name: decisions_file
+    description: "YAML file capturing all user decisions (KPI, excluded columns, categorical columns, primary key, memory budget, worker count, find time) at finder/{stem}/{kpi_name}-decisions.yaml"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read the schema output at finder/{stem}/schema.txt (if it exists) or run
+        `utilities/parquet_schema.py` on the exported parquet to see the actual columns
+        in the dataset. Verify decisions reference real columns.
+        - The decisions file MUST contain all required fields: kpi_name, memory_budget_gb, finder_workers, max_find_time, excluded_columns, categorical_columns, and primary_key.
+        - The kpi_name MUST reference a column that exists in the dataset and is a reasonable KPI (numeric or boolean outcome column, not an ID or categorical descriptor).
+        - All columns listed in excluded_columns MUST exist in the dataset and be reasonable exclusions (KPI-leaking columns, datetime columns, or synthetic counters).
+  - name: parsed_results
+    description: "Parsed finder results at finder/{stem}/{kpi_name}-patterns.yaml with run overview, pattern counts, and patterns"
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Verify the parsed finder results:
+        - The parsed results MUST contain no errors in the summary.errors field.
+        - The finder MUST have discovered a non-zero number of patterns. If zero patterns were found, this indicates a configuration or data issue.
+        - There MUST NOT be any 100%/0% single-filter patterns in the results. Patterns where a single condition produces a 100% or 0% KPI rate generally indicate mutual information (the column encodes the KPI) rather than a genuine insight. If found, the column should be added to excluded_columns.
+  - name: draft_report
+    description: "Draft markdown report at finder/{stem}/finder_analysis_report.md"
+    type: file_path
+  - name: finder_binary_path
+    description: "Project-local Finder executable at utilities/finder/finder."
+    type: file_path
+  - name: finder_provenance
+    description: "Provenance metadata for the Finder binary at utilities/finder/finder.provenance.json when downloaded."
+    type: file_path
+
+workflows:
+  run_finder:
+    summary: "Full pipeline from data export to draft finder report"
+    common_job_info_provided_to_all_steps_at_runtime: |
+      This workflow runs the Unsupervised finder tool on exported SQL data to discover
+      statistically significant patterns, then produces a draft markdown report of
+      the findings. It is designed to be used as a sub-workflow within a larger
+      analysis workflow (e.g., ad_hoc_research_report) which handles final formatting.
+
+      Pipeline overview:
+      1. Ensure the Finder binary exists at `utilities/finder/finder` and is executable
+      2. Export data using the repo's sql_query_tool (writes a .query file + parquet)
+      3. Interactively select KPI, screen columns, configure primary key
+      4. Prepare data: coerce types, set index, generate quintile conditions
+      5. Execute the finder binary and parse results
+      6. Draft a markdown report summarizing the findings
+
+      Key conventions:
+      - Data export uses the existing `sql_query_tool` from `utilities/`. Query files
+        are `.query` files with YAML frontmatter (see `utilities/HOW_TO_QUERY.md`).
+        The query tool outputs results in the same folder as the query file.
+      - Finder artifacts live under `finder/{stem}/` where `{stem}` is a short,
+        descriptive name for the analysis (e.g., `telco_churn`). The query file is
+        written directly into this directory as `data.query` so the query tool
+        outputs `data.parquet` alongside it — no copy step needed.
+      - User decisions (KPI, excluded columns, categorical columns, primary key,
+        find time) and automatic defaults (memory budget, worker count) are saved to
+        `finder/{stem}/{kpi_name}-decisions.yaml` after the first run. On subsequent
+        runs with the same dataset and KPI, these saved decisions are reused
+        automatically — the user is not re-prompted.
+      - Note that Finder can run on a subset of the columns that are exported, so
+        you do not need to regenerate the data file if you already have a superset
+        of the needed columns.
+      - The finder binary is at `utilities/finder/finder` (in the project's utilities directory). If it is missing, this workflow downloads the correct platform binary before execution.
+      - Finder-specific Python scripts are in `utilities/finder/` and run via `.venv/bin/python`.
+      - General-purpose data utilities are in `utilities/` and run via `.venv/bin/python`.
+
+      Script inventory:
+      - `utilities/parquet_schema.py <parquet_file>` — lists columns and types
+      - `utilities/finder/coerce_types.py <parquet_file> --kpi <name> --decisions-file <file>` (required) — coerces column types, appends datetime columns to decisions file's excluded_columns
+      - `utilities/finder/unique_columns.py <parquet_file>` — finds unique-valued columns
+      - `utilities/parquet_set_index.py <parquet_file> <column>` — sets the parquet file's index to the given column
+      - `utilities/finder/quintiles.py <parquet_file> --decisions-file <file>` (required) — computes quintile boundaries, reads excluded/categorical columns from decisions file
+      - `utilities/finder/genconfig.py <source> --decisions-file <file> --merge <file>...` (required) — generates finder config, reads excluded_columns and primary_key from decisions file
+      - `utilities/finder/parse_finder.py <jsonl_file> --config <config_file>` — parses finder output
+      - `utilities/cpu_count.py` — prints the number of CPU cores available on this machine
+      - `utilities/finder/write_env.py <decisions_file> -o <env_file>` — writes the finder env file from a decisions file
+      - `utilities/finder/seconds_until_7am.py` — prints seconds and hours until 7 AM (e.g. `39600 11`)
+      - `utilities/sponge <file>` — reads all stdin then writes to file (safe in-place yq edits)
+    steps:
+      - name: ensure_finder_binary
+        instructions: |
+          # Ensure Finder Binary
+
+          ## Objective
+
+          Verify that the project-local Finder binary exists at `utilities/finder/finder`,
+          downloading it when absent. This workflow owns Finder setup; do not call a
+          separate analyst preparation workflow.
+
+          ## Task
+
+          Run this setup before exporting data or executing Finder. The preferred binary
+          path is `utilities/finder/finder`, matching the execution step and the
+          project-local utilities convention used by this job.
+
+          Required behavior:
+          - Preferred path: `utilities/finder/finder`.
+          - Provenance path: `utilities/finder/finder.provenance.json`.
+          - If `utilities/finder/finder` exists and is executable, do not download again.
+          - If it exists but is not executable, run `chmod +x utilities/finder/finder` and verify it.
+          - If missing, detect the platform and download the correct binary:
+            - Linux: `https://cli.unsupervised.com/finder-free-linux`
+            - macOS arm64: `https://cli.unsupervised.com/finder-free-macos-arm`
+          - Write downloads to `utilities/finder/.finder.download` first, then atomically move to `utilities/finder/finder`.
+          - Write provenance metadata when a download occurs.
+
+          Use this shell procedure unless the environment requires an equivalent:
+
+          ```bash
+          set -euo pipefail
+          mkdir -p utilities/finder
+
+          FINDER_BIN="utilities/finder/finder"
+          PROVENANCE="utilities/finder/finder.provenance.json"
+
+          if [ -x "$FINDER_BIN" ]; then
+            echo "Finder already available at $FINDER_BIN"
+          else
+            if [ -f "$FINDER_BIN" ]; then
+              chmod +x "$FINDER_BIN"
+            fi
+
+            if [ ! -x "$FINDER_BIN" ]; then
+              os="$(uname -s)"
+              arch="$(uname -m)"
+              case "$os/$arch" in
+                Linux/*)
+                  url="https://cli.unsupervised.com/finder-free-linux"
+                  ;;
+                Darwin/arm64|Darwin/aarch64)
+                  url="https://cli.unsupervised.com/finder-free-macos-arm"
+                  ;;
+                *)
+                  echo "Unsupported Finder platform: $os/$arch" >&2
+                  exit 1
+                  ;;
+              esac
+
+              tmp="utilities/finder/.finder.download"
+              curl -fL --retry 3 --connect-timeout 20 -o "$tmp" "$url"
+              mv "$tmp" "$FINDER_BIN"
+              chmod +x "$FINDER_BIN"
+
+              if command -v sha256sum >/dev/null 2>&1; then
+                sha256="$(sha256sum "$FINDER_BIN" | awk '{print $1}')"
+              elif command -v shasum >/dev/null 2>&1; then
+                sha256="$(shasum -a 256 "$FINDER_BIN" | awk '{print $1}')"
+              else
+                sha256="unknown"
+              fi
+
+              size_bytes="$(wc -c < "$FINDER_BIN" | tr -d ' ')"
+              downloaded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              export FINDER_URL="$url" FINDER_PLATFORM="$os/$arch" FINDER_SHA256="$sha256" FINDER_SIZE_BYTES="$size_bytes" FINDER_DOWNLOADED_AT="$downloaded_at" PROVENANCE
+              python3 -c 'import json, os; from pathlib import Path; Path(os.environ["PROVENANCE"]).write_text(json.dumps({"binary_path":"utilities/finder/finder","url":os.environ["FINDER_URL"],"platform":os.environ["FINDER_PLATFORM"],"sha256":os.environ["FINDER_SHA256"],"size_bytes":int(os.environ["FINDER_SIZE_BYTES"]),"downloaded_at":os.environ["FINDER_DOWNLOADED_AT"]}, indent=2) + "\n")'
+            fi
+          fi
+
+          "$FINDER_BIN" --help >/tmp/finder-help.txt 2>&1 || true
+          test -x "$FINDER_BIN"
+          ```
+
+          ## Output Format
+
+          ### finder_binary_path
+
+          The path `utilities/finder/finder` after verifying it exists and is executable.
+
+          ### finder_provenance
+
+          The path `utilities/finder/finder.provenance.json` if a download occurred, or
+          a note that Finder already existed and no new provenance was written.
+        outputs:
+          finder_binary_path:
+            required: true
+          finder_provenance:
+            required: false
+
+      - name: data_export
+        instructions: |
+          # Data Export
+
+          ## Objective
+
+          Export data from a SQL datasource using the repo's sql_query_tool, set up the
+          finder working directory, and analyze the schema. This step produces the parquet
+          dataset and schema reference that downstream steps use for column configuration
+          and finder execution.
+
+          ## Task
+
+          Write a query file to export data directly into the finder working directory
+          and generate a schema summary. No interactive prompts are needed in this step —
+          it is purely mechanical data export and inspection.
+
+          ### Process
+
+          #### 0. Research the datasource and plan the export query
+
+          Before writing any query, consult the datasource documentation:
+          - Read `datasources/{datasource}/key_tables.md` to identify the KPI column and
+            understand what tables are available
+          - Explore `datasources/{datasource}/catalog/tables/` for detailed table schemas
+          - Identify the KPI column the user wants to analyze
+          - Pull in any column that might possibly be relevant to the behavior of the KPI —
+            err on the side of including more columns rather than fewer
+          - Look at other tables that could be joined on, and join them to bring in
+            additional columns that might be important for explaining the KPI
+          - Check `queries/reference/` for existing queries on this datasource that could
+            serve as a starting point
+
+          If anything is confusing about the datasource schema or table relationships,
+          check the datasource documentation first, then ask the user via AskUserQuestion
+          with specific suggestions based on what you found.
+
+          Note: Finder can run on a subset of the columns that are exported, so you do not
+          need to regenerate the data file if you already have a superset of the needed
+          columns.
+
+          #### 1. Set up the finder working directory
+
+          Choose a short, descriptive `{stem}` for this analysis (e.g., `telco_churn`).
+
+          ```bash
+          mkdir -p finder/{stem}
+          ```
+
+          #### 2. Write and execute the export query
+
+          Write a standard query file (see `utilities/HOW_TO_QUERY.md` for the format)
+          with `output: parquet_file` to export a wide dataset. Place the query file
+          directly in the finder working directory at `finder/{stem}/data.query`.
+
+          Run the query using the appropriate query tool from `utilities/`:
+          ```bash
+          python utilities/{datasource}_query_tool.py finder/{stem}/data.query
+          ```
+
+          The query tool outputs the parquet file in the same folder as the query file,
+          so `finder/{stem}/data.parquet` is created automatically — no copy needed.
+
+          #### 3. Analyze schema
+
+          ```bash
+          .venv/bin/python utilities/parquet_schema.py finder/{stem}/data.parquet
+          ```
+
+          Save the output for reference in subsequent steps. Write it to
+          `finder/{stem}/schema.txt` for the review step.
+
+          ## Output Format
+
+          ### data_dir
+
+          The finder working directory path `finder/{stem}/` containing:
+          - `data.parquet` — the exported dataset
+          - `schema.txt` — column names and types
+        inputs:
+          datasource:
+            required: true
+          analysis_goal:
+            required: true
+        outputs:
+          data_dir:
+            required: true
+
+      - name: configuration
+        instructions: |
+          # Configuration
+
+          ## Objective
+
+          Collect resource settings, interactively select a KPI, screen columns for
+          exclusion, configure the primary key, and identify categorical columns. All user
+          decisions are stored in a single YAML decisions file that is created early and
+          updated incrementally as feedback is received, so future runs can reuse them
+          without re-prompting.
+
+          ## Task
+
+          Using the exported schema from the data export step, gather the user decisions
+          needed to configure the finder tool. This involves several sub-steps with user
+          interaction for KPI selection and column screening. If a decisions file already
+          exists for this dataset and KPI, validate it against the current schema and
+          reuse it.
+
+          ### Decisions file convention
+
+          Several steps below update the decisions YAML file. The pattern is always:
+          read the file with `yq`, modify the relevant field, and write it back. For
+          example, to append a value to `excluded_columns`:
+
+          ```bash
+          yq -y --arg col "Column Name" '.excluded_columns += [$col]' finder/{stem}/{kpi_name}-decisions.yaml | utilities/sponge finder/{stem}/{kpi_name}-decisions.yaml
+          ```
+
+          ### Process
+
+          #### 0. Check for existing decisions
+
+          Look for existing decisions files matching `finder/{stem}/*-decisions.yaml`. If
+          one is found, validate it against the current schema before reusing:
+
+          1. Read `finder/{stem}/schema.txt` to get the current column list
+          2. Read the decisions file and check that:
+             - `kpi_name` still exists as a column in the schema
+             - All entries in `excluded_columns` still exist in the schema (ignore "All Data"
+               which is synthetic)
+             - All entries in `categorical_columns` still exist in the schema
+             - `primary_key` still exists in the schema (if not "All Data")
+          3. If the decisions file lacks `memory_budget_gb`, `finder_workers`, or
+             `max_find_time`, collect resource settings (see "Collect resource settings"
+             below) and backfill them:
+             ```bash
+             yq -y --arg m "{memory_budget_gb}" --arg w "{finder_workers}" --arg t "{max_find_time}" \
+               '. + {memory_budget_gb: ($m | tonumber), finder_workers: ($w | tonumber), max_find_time: ($t | tonumber)}' \
+               finder/{stem}/{kpi_name}-decisions.yaml | utilities/sponge finder/{stem}/{kpi_name}-decisions.yaml
+             ```
+          4. If all references are valid, inform the user that saved decisions are being
+             reused and output the decisions file. The preparation step handles the rest.
+          5. If any references are invalid, inform the user which fields reference missing
+             columns and ask via AskUserQuestion whether to:
+             - **Re-run interactively** — delete the decisions file and proceed through all
+               interactive steps below (starting at step 1)
+             - **Update the decisions file** — remove the invalid column references and
+               output the corrected decisions file
+
+          If no decisions file exists, proceed to step 1.
+
+          #### 1. Choose KPI
+
+          From the schema output, identify reasonable KPI candidates:
+          - **Good KPIs**: numeric columns (int, float, double) representing a measurable
+            outcome or metric (revenue, churn rate, score, count of events); boolean columns
+            representing a binary outcome (churned, converted, defaulted)
+          - **Poor KPIs**: ID or key columns, categorical descriptors, dates/timestamps,
+            input features rather than outcomes
+
+          Ask structured questions using AskUserQuestion to present the top KPI candidates
+          (up to 4) as options and ask the user which KPI to analyze. Order with the most
+          likely KPI first.
+
+          The user's selection becomes `{kpi_name}`.
+
+          #### 2. Collect resource settings and initialize the decisions file
+
+          Collect resource settings (see "Collect resource settings" below) to get
+          `{memory_budget_gb}`, `{finder_workers}`, and `{max_find_time}`.
+
+          Create the decisions file at `finder/{stem}/{kpi_name}-decisions.yaml` with the
+          initial values:
+
+          ```yaml
+          stem: "{stem}"
+          query_file: "finder/{stem}/data.query"
+          kpi_name: "{kpi_name}"
+          memory_budget_gb: {memory_budget_gb}
+          finder_workers: {finder_workers}
+          max_find_time: {max_find_time}
+          excluded_columns: []
+          categorical_columns: []
+          primary_key: "All Data"
+          ```
+
+          This file will be updated incrementally by subsequent steps.
+
+          #### 3. Screen for KPI-leaking columns
+
+          Using the schema output, identify columns whose names suggest they are a
+          consequence of, derived from, or encode the same information as the KPI. These
+          leak the KPI rather than predict it.
+
+          Examples of leaking columns for a KPI called "Churn Value":
+          - "Churn Category", "Churn Reason", "Churn Score" -- describe how/why churn
+            happened, only knowable after the event
+          - "Customer Status" -- directly encodes churned vs. active
+
+          Examples that do NOT leak:
+          - "Contract", "Tenure in Months", "Monthly Charge" -- observable before the outcome
+
+          If candidates are found, ask structured questions using AskUserQuestion with a
+          multi-select list. Include a "None" option. Append selected columns to the
+          decisions file's `excluded_columns` array (see convention above).
+
+          If no candidates are found, skip silently.
+
+          #### 4. Detect unique columns
+
+          ```bash
+          .venv/bin/python utilities/finder/unique_columns.py finder/{stem}/data.parquet
+          ```
+
+          Prints one column name per line to stdout.
+
+          #### 5. Choose primary key
+
+          If unique columns were found, ask the user via AskUserQuestion to select the
+          primary key. Present the unique column names as options (up to 4), ordered with
+          the most plausible identifier first (e.g., "Customer ID" over "Row Number").
+          Include a "None — use default" option that keeps the default "All Data".
+
+          If no unique columns were found, keep the default "All Data" and skip silently.
+
+          #### 6. Set primary key and exclude "All Data"
+
+          If a column was chosen (not "All Data"), update the decisions file:
+
+          ```bash
+          yq -y --arg col "<chosen_column>" '.primary_key = $col' finder/{stem}/{kpi_name}-decisions.yaml | utilities/sponge finder/{stem}/{kpi_name}-decisions.yaml
+          ```
+
+          Always add "All Data" to the decisions file's `excluded_columns` (synthetic
+          sequential counter from the export step with no analytical value) if not already
+          present (see convention above).
+
+          #### 7. Screen numeric columns for categorical misuse
+
+          Using the schema output, identify numeric (non-boolean) columns where
+          inequality-based conditions don't make semantic sense -- values are identifiers or
+          codes, not quantities. Exclude columns already in the decisions file's
+          `excluded_columns` and the KPI from consideration.
+
+          Examples that should NOT have inequalities (treat as categorical):
+          - Zip Code, area codes, phone numbers, foreign keys, ID columns, FIPS codes
+
+          Examples that should keep inequalities:
+          - Age, Monthly Charge, Tenure in Months, counts, rates, scores, amounts
+
+          If candidates are found, ask structured questions using AskUserQuestion with a
+          multi-select list. Include a "None" option. Set the decisions file's
+          `categorical_columns` array to the selected columns (see convention above).
+
+          If no candidates are found, skip silently.
+
+          ### Collect resource settings
+
+          Determine memory budget and worker count automatically, then ask the user for max
+          find time. This sub-routine is referenced by steps 0 and 2; run it only once per
+          session and reuse the values.
+
+          **Memory budget** — set `{memory_budget_gb}` to `8`.
+
+          **Worker count** — detect the machine's CPU core count:
+
+          ```bash
+          .venv/bin/python utilities/cpu_count.py
+          ```
+
+          Capture the output as `{detected_cores}`. Set `{finder_workers}` to
+          `{detected_cores}` divided by 2 (rounded down, minimum 1).
+
+          **Max find time** — first compute the overnight value:
+
+          ```bash
+          .venv/bin/python utilities/finder/seconds_until_7am.py
+          ```
+
+          The script prints two space-separated values: seconds and hours (e.g. `39600 11`).
+          Capture them as `{overnight_secs}` and `{overnight_hours}`. Then ask via
+          AskUserQuestion:
+
+          > How long should the finder binary spend finding patterns?
+          > The default is 1 hour, which works for most datasets. Increase this for larger
+          > datasets or when you want a more exhaustive search.
+          >
+          > Note: this controls only the pattern-finding phase. After finding completes,
+          > the finder ranks the discovered patterns. Ranking time depends on how many
+          > patterns were found, which in turn depends on the data, available memory,
+          > cores, and find time. Total runtime will exceed this value.
+
+          Present options:
+          - label: "Quick (15 minutes)", description: "Good for small datasets or testing"
+          - label: "Normal (1 hour)" (default), description: "Works for most datasets"
+          - label: "Overnight (~{overnight_hours} hours until 7 AM)", description: "Let it run while you sleep — {overnight_secs} seconds"
+
+          The value for each option is the number of seconds: 900, 3600, or {overnight_secs}.
+          The user can also type a custom value in seconds.
+
+          Save the three values as `{memory_budget_gb}`, `{finder_workers}`, and
+          `{max_find_time}`.
+
+          ## Output Format
+
+          ### decisions_file
+
+          A YAML file at `finder/{stem}/{kpi_name}-decisions.yaml`.
+
+          **Structure**:
+          ```yaml
+          stem: finder_telco
+          query_file: finder/finder_telco/data.query
+          kpi_name: Churn Value
+          memory_budget_gb: 8
+          finder_workers: 4
+          max_find_time: 3600
+          excluded_columns:
+            - Churn Category
+            - Churn Reason
+            - Churn Score
+            - Customer Status
+            - All Data
+          categorical_columns:
+            - Zip Code
+            - Area Code
+          primary_key: Customer ID
+          ```
+
+          Notes:
+          - `excluded_columns` includes "All Data" plus any user-selected KPI-leaking columns.
+            The preparation step adds datetime columns detected by coerce_types.py
+          - `categorical_columns` may be an empty array if no numeric columns need
+            categorical treatment
+          - `primary_key` is "All Data" if no unique column was found
+        inputs:
+          data_dir:
+            required: true
+        outputs:
+          decisions_file:
+            required: true
+
+      - name: preparation
+        instructions: |
+          # Preparation
+
+          ## Objective
+
+          Prepare the exported dataset for the finder binary by coercing column types,
+          setting the parquet index, and generating quintile boundary conditions. This step
+          is fully automated with no user interaction — it applies the decisions captured
+          by the configuration step.
+
+          ## Task
+
+          Read the decisions file and run the deterministic pipeline scripts to transform
+          the parquet data and generate the quintile conditions file needed by the finder
+          configuration. If any command exits with a non-zero status, stop execution and
+          report the failure (including stderr output) as the step output.
+
+          ### Process
+
+          In the commands below, `{decisions_file}` comes from the step input. `{stem}`
+          and `{kpi_name}` are read from the decisions file. The data file at
+          `finder/{stem}/data.parquet` was produced by the data_export step.
+
+          #### 1. Read decisions
+
+          ```bash
+          DECISIONS_FILE={decisions_file}
+          STEM=$(yq -r '.stem' "$DECISIONS_FILE")
+          KPI=$(yq -r '.kpi_name' "$DECISIONS_FILE")
+          PRIMARY_KEY=$(yq -r '.primary_key' "$DECISIONS_FILE")
+          ```
+
+          #### 2. Coerce types
+
+          ```bash
+          .venv/bin/python utilities/finder/coerce_types.py "finder/$STEM/data.parquet" --kpi "$KPI" --decisions-file "$DECISIONS_FILE"
+          ```
+
+          This overwrites the parquet with coerced column types and appends any detected
+          datetime column names to the decisions file's `excluded_columns` array.
+
+          #### 3. Set parquet index
+
+          If `primary_key` is not "All Data", set the parquet file's index:
+
+          ```bash
+          if [ "$PRIMARY_KEY" != "All Data" ]; then
+            .venv/bin/python utilities/parquet_set_index.py "finder/$STEM/data.parquet" "$PRIMARY_KEY"
+          fi
+          ```
+
+          #### 4. Generate quintile conditions
+
+          ```bash
+          .venv/bin/python utilities/finder/quintiles.py "finder/$STEM/data.parquet" --decisions-file "$DECISIONS_FILE" > "finder/$STEM/quintiles.yaml"
+          ```
+
+          This computes quintile boundary conditions for all numeric columns not in
+          `excluded_columns` or `categorical_columns`. The output is a YAML file used
+          by `genconfig.py` in the execution step.
+
+          ## Output Format
+
+          ### decisions_file
+
+          The decisions file at `finder/{stem}/{kpi_name}-decisions.yaml`, potentially
+          updated with datetime columns added to `excluded_columns` by coerce_types.
+        inputs:
+          decisions_file:
+            required: true
+          data_dir:
+            required: true
+        outputs:
+          decisions_file:
+            required: true
+
+      - name: execution
+        instructions: |
+          # Run Finder
+
+          ## Objective
+
+          Build the finder configuration file, execute the finder binary, and parse the
+          output into a structured YAML summary ready for report drafting.
+
+          ## Task
+
+          Using the decisions from the configuration step, generate the finder
+          configuration and run the analysis. This step is fully automated with no user
+          interaction. Use `yq` to inspect and manipulate YAML/JSON files throughout.
+
+          ### Process
+
+          In the commands below, `{decisions_file}`, `{stem}`, `{kpi_name}`, and
+          `{query_file}` are placeholders that must be replaced with actual values.
+          `{decisions_file}` comes from the step input; the others are read from the
+          decisions file. The data file at `finder/{stem}/data.parquet` was produced by the
+          data_export step. If any
+          command exits with a non-zero status, stop execution and report the failure
+          (including stderr output) as the step output.
+
+          #### 1. Read decisions
+
+          Read the decisions file passed as the `decisions_file` input from the
+          configuration step. Extract:
+          - `{stem}` from the `.stem` field
+          - `{kpi_name}` from the `.kpi_name` field
+          - `{query_file}` from the `.query_file` field
+
+          ```bash
+          DECISIONS_FILE={decisions_file}
+          yq -r '.stem' "$DECISIONS_FILE"
+          yq -r '.kpi_name' "$DECISIONS_FILE"
+          yq -r '.query_file' "$DECISIONS_FILE"
+          ```
+
+          All paths in subsequent steps use these extracted values as placeholders.
+          Resource settings (`memory_budget_gb`, `finder_workers`, `max_find_time`) are
+          read directly from the decisions file by `write_env.py` and `genconfig.py` —
+          you do not need to extract them here.
+
+          #### 2. Generate finder config
+
+          ```bash
+          .venv/bin/python utilities/finder/genconfig.py {query_file} --decisions-file "$DECISIONS_FILE" --merge finder/{stem}/quintiles.yaml > finder/{stem}/finder_config.json
+          ```
+
+          #### 3. Write env file
+
+          Write the finder environment file at `finder/{stem}/env` from the decisions file:
+
+          ```bash
+          .venv/bin/python utilities/finder/write_env.py "$DECISIONS_FILE" -o finder/{stem}/env
+          ```
+
+          #### 4. Run finder
+
+          Confirm the Finder setup step has left an executable binary at `utilities/finder/finder`, then run it:
+
+          ```bash
+          test -x utilities/finder/finder
+          source finder/{stem}/env && utilities/finder/finder --input finder/{stem}/finder_config.json > finder/{stem}/finder_output.jsonl
+          ```
+
+          This may take hours depending on dataset size and column count. Use the Bash
+          tool's `run_in_background` parameter and wait for the completion notification.
+          Do not proceed to step 5 until the finder run completes successfully.
+
+          #### 5. Parse finder output
+
+          ```bash
+          .venv/bin/python utilities/finder/parse_finder.py finder/{stem}/finder_output.jsonl --config finder/{stem}/finder_config.json > finder/{stem}/{kpi_name}-patterns.yaml
+          ```
+
+          The output YAML has two top-level keys:
+          - `finder_output` -- raw finder data (full pattern objects, summary, warnings, errors)
+          - `summary` -- LLM-friendly view with `run_overview`, `pattern_counts`, `patterns`
+            (human-readable conditions), `warnings`, `errors`
+
+          #### 6. Verify results
+
+          Check the parsed output for errors and mutual information patterns:
+
+          ```bash
+          # Check for errors
+          yq '.summary.errors' finder/{stem}/{kpi_name}-patterns.yaml
+
+          # Check pattern counts
+          yq '.summary.pattern_counts' finder/{stem}/{kpi_name}-patterns.yaml
+
+          # Check for 100%/0% single-filter patterns (indicates mutual information)
+          yq '[.summary.patterns[] | select((.conditions | split(" AND ") | length) == 1) | select(.measure_value == 0 or .measure_value == 1)]' finder/{stem}/{kpi_name}-patterns.yaml
+          ```
+
+          If `summary.errors` is non-empty or `summary.pattern_counts.found` is 0, stop and
+          report the failure as the step output. Do not proceed to report drafting with empty
+          or errored results.
+
+          If 100%/0% single-filter patterns are found, these generally indicate mutual
+          information -- the column encodes the KPI rather than being a genuine predictor.
+          To fix:
+          1. Identify the column name from the pattern's conditions
+          2. Add the column to the decisions file's `excluded_columns` array:
+             ```bash
+             yq -y --arg col "<column_name>" '.excluded_columns += [$col]' "$DECISIONS_FILE" | utilities/sponge "$DECISIONS_FILE"
+             ```
+          3. Regenerate quintiles and repeat steps 2 through 6 (generate config, write
+             env file, run finder, parse output, verify). Note: this includes re-running the finder
+             binary, which may take hours per iteration.
+             ```bash
+             .venv/bin/python utilities/finder/quintiles.py finder/{stem}/data.parquet --decisions-file "$DECISIONS_FILE" > finder/{stem}/quintiles.yaml
+             ```
+          4. If mutual information patterns persist after 3 re-run attempts, or if the
+             same patterns reappear after exclusion, report them as the step output and
+             stop
+
+          ## Output Format
+
+          ### parsed_results
+
+          The file at `finder/{stem}/{kpi_name}-patterns.yaml` produced by `parse_finder.py`.
+
+          **Structure**:
+          ```yaml
+          finder_output:
+            "...": "raw finder data"
+          summary:
+            run_overview:
+              finder_type: "..."
+              data_file: "..."
+              kpi_name: "..."
+              kpi_baseline: 0.0
+              total_records: 0
+              runtime_seconds: 0
+            pattern_counts:
+              found: 0
+              ranked: 0
+              new: 0
+              existing: 0
+              rejected: 0
+            patterns:
+              - conditions: "Column A = value AND Column B >= 10"
+                measure_value: 0.85
+                size: 1234
+                ks_score_normalized: 0.95
+                key_driver: "Column A"
+            warnings: []
+            errors: []
+          ```
+        inputs:
+          decisions_file:
+            required: true
+        outputs:
+          parsed_results:
+            required: true
+
+      - name: draft_report
+        instructions: |
+          # Draft Report
+
+          ## Objective
+
+          Analyze the parsed finder output and write a draft markdown report that presents
+          the run overview, top patterns, and an analytical narrative explaining the most
+          notable findings.
+
+          ## Task
+
+          Read the parsed finder results and the decisions file, then synthesize them into
+          a clear, data-backed markdown report. This draft will be used by the calling
+          workflow (e.g., ad_hoc_research_report) for final formatting.
+
+          ### Process
+
+          #### 1. Read inputs
+
+          The `decisions_file` and `parsed_results` paths come from the step inputs. Read
+          the decisions file to extract `{stem}` (from `.stem`) and `{kpi_name}` (from
+          `.kpi_name`), then use those to load the parsed results from
+          `finder/{stem}/{kpi_name}-patterns.yaml`.
+
+          Every number, percentage, and pattern description in the report MUST come directly
+          from the parsed data. Do not approximate, round, or infer values not present in
+          the source files.
+
+          Extract key data using yq. The KS-normalized ranking is used for the Top Patterns
+          table. The measure_value and size rankings are reference data for the Key Findings
+          narrative — use them to identify and discuss patterns that stand out on those
+          dimensions:
+
+          ```bash
+          # Run overview and pattern counts
+          yq '.summary.run_overview' finder/{stem}/{kpi_name}-patterns.yaml
+          yq '.summary.pattern_counts' finder/{stem}/{kpi_name}-patterns.yaml
+
+          # Top 10 patterns by KS normalized score
+          yq '[.summary.patterns | sort_by(-.ks_score_normalized) | .[:10] | .[] | {conditions, measure_value, size, key_driver}]' finder/{stem}/{kpi_name}-patterns.yaml
+
+          # Top 10 patterns by measure_value (highest KPI)
+          yq '[.summary.patterns | sort_by(-.measure_value) | .[:10] | .[] | {conditions, measure_value, size, key_driver}]' finder/{stem}/{kpi_name}-patterns.yaml
+
+          # Top 10 patterns by size (largest segments)
+          yq '[.summary.patterns | sort_by(-.size) | .[:10] | .[] | {conditions, measure_value, size, key_driver}]' finder/{stem}/{kpi_name}-patterns.yaml
+
+          # Warnings and errors
+          yq '.summary.warnings, .summary.errors' finder/{stem}/{kpi_name}-patterns.yaml
+          ```
+
+          #### 2. Determine labels
+
+          - Use `kpi_name` from `run_overview` as the KPI column header in tables
+          - For the size label, derive a meaningful noun from the primary_key in the decisions
+            file (e.g., if primary_key is "Customer ID" use "Customers"; if "Order ID" use
+            "Orders"; if "All Data" or the primary key does not map to an obvious plural
+            noun, use "Records")
+
+          #### 3. Write the report
+
+          Structure the report with these sections:
+
+          1. **Executive Summary** -- 2-3 sentences on what was analyzed and the headline
+             finding
+          2. **Run Overview** -- finder type, data size, KPI info, runtime
+          3. **Pattern Discovery Summary** -- pattern counts (found/ranked/new/existing/rejected)
+          4. **Top Patterns** -- markdown table of top 10 patterns by KS normalized score
+             with columns: #, Conditions, {kpi_name}, {size_label}, Key Driver
+          5. **Key Findings** -- analytical narrative highlighting the most notable patterns,
+             explaining what they mean and why they matter. Group related patterns where
+             possible. Call out any surprising results.
+          6. **Warnings & Issues** -- any warnings or errors from the finder run, or "None"
+          7. **Methodology** -- brief note on how finder works (exhaustive pattern search,
+             statistical significance testing) for context
+
+          Save the draft report to `finder/{stem}/finder_analysis_report.md`.
+
+          #### 4. Write supporting data files
+
+          For potential downstream formatting, extract the top patterns data into a JSON file:
+
+          ```bash
+          yq -y '.summary.patterns | sort_by(-.ks_score_normalized) | .[:10]' finder/{stem}/{kpi_name}-patterns.yaml > finder/{stem}/top_patterns.yaml
+          ```
+
+          ## Output Format
+
+          ### draft_report
+
+          A markdown file at `finder/{stem}/finder_analysis_report.md`.
+
+          **Structure**:
+          ```markdown
+          # Finder Analysis Report: {stem}
+
+          ## Executive Summary
+
+          [2-3 sentences: what was analyzed, headline finding]
+
+          ## Run Overview
+
+          | Parameter | Value |
+          |---|---|
+          | Finder Type | [type] |
+          | Dataset | [data file] |
+          | KPI | [kpi_name] |
+          | KPI Baseline | [baseline value] |
+          | Total Records | [count] |
+          | Runtime | [seconds]s |
+
+          ## Pattern Discovery
+
+          | Metric | Count |
+          |---|---|
+          | Patterns Found | [n] |
+          | Patterns Ranked | [n] |
+          | New Patterns | [n] |
+          | Existing Patterns | [n] |
+          | Rejected Patterns | [n] |
+
+          ## Top Patterns
+
+          | # | Conditions | {kpi_name} | {size_label} | Key Driver |
+          |---|---|---|---|---|
+          | 1 | [conditions] | [value] | [size] | [driver] |
+          | 2 | [conditions] | [value] | [size] | [driver] |
+          | ... | ... | ... | ... | ... |
+
+          ## Key Findings
+
+          [Analytical narrative organized by theme. Each finding should:
+          - State what the pattern shows
+          - Explain why it matters
+          - Note the segment size for context
+          - Connect to business implications where possible]
+
+          ### [Finding Theme 1]
+
+          [Discussion of related patterns]
+
+          ### [Finding Theme 2]
+
+          [Discussion of related patterns]
+
+          ## Warnings & Issues
+
+          [List any warnings/errors, or "None reported."]
+
+          ## Methodology
+
+          Patterns were discovered using the Unsupervised finder tool, which performs an
+          exhaustive search across all column combinations to identify statistically
+          significant segments. Patterns are ranked by the Kolmogorov-Smirnov (KS)
+          normalized score, which measures how different a segment's KPI distribution is
+          from the overall population. Higher scores indicate more distinctive segments.
+          ```
+        inputs:
+          parsed_results:
+            required: true
+          decisions_file:
+            required: true
+        outputs:
+          draft_report:
+            required: true
+        process_requirements:
+          data_accuracy: "All numbers, percentages, and pattern descriptions in the report MUST match the parsed finder output exactly."
+          complete_coverage: "The report MUST include a run overview, pattern counts, a top-10 patterns table, and an analytical summary."
+          explainability: "The analytical summary MUST highlight the most notable findings and explain why they matter, not just what they are."
+          no_hallucinated_data: "Every data point in the report MUST trace back to the parsed results. No statistics or patterns are invented."

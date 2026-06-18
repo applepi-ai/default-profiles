@@ -1,0 +1,34 @@
+prompt_best_practices:
+  description: "Review prompt/instruction markdown files for Anthropic prompt engineering best practices."
+  match:
+    include:
+      - "**/CLAUDE.md"
+      - "**/AGENTS.md"
+      - "**/*.md"
+    exclude:
+      - "**/research_report_job_best_practices.md"
+  review:
+    strategy: individual
+    instructions: |
+      Review this markdown file as a prompt or instruction file, evaluating it
+      against Anthropic's prompt engineering best practices.
+
+      For each issue found, report:
+      1. Location (section or line)
+      2. Severity (Critical / High / Medium / Low)
+      3. Best practice violated
+      4. Description of the issue
+      5. Suggested improvement
+
+      Check for:
+      - Clarity and specificity (concrete criteria vs vague language)
+      - Structure and formatting (XML tags, headers, numbered lists for distinct sections)
+      - Role and context (enough context for the AI, explicit assumptions)
+      - Examples for complex/nuanced tasks
+      - Output format specification
+      - Prompt anti-patterns (contradictions, instruction overload, buried critical instructions)
+      - Variable/placeholder clarity
+
+      Use judgment proportional to the file's complexity. A short, focused
+      instruction for a simple task does not need few-shot examples or XML tags.
+      Do not flag issues for best practices that are irrelevant to the file's purpose.

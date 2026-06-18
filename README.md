@@ -5,7 +5,7 @@ Default profile source for ApplePi users.
 ## Profiles
 
 - `engineer` - software engineering profile for coding, debugging, reviews, and implementation planning.
-- `data_analyst` - senior data analysis profile for dataset exploration, metric design, experiment review, business insight briefs, and executive reporting. Includes profile-bundled DeepWork analyst jobs and a `/demos` skill for oil/healthcare demos.
+- `data_analyst` - senior data analysis profile for dataset exploration, metric design, experiment review, business insight briefs, and executive reporting. Defaults Pi to `openai-codex` / `gpt-5.5`, and includes profile-bundled DeepWork analyst jobs plus a `/demos` skill for oil/healthcare demos.
 
 ## Data analyst DeepWork jobs
 

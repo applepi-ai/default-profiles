@@ -1,5 +1,6 @@
 id: engineer
 label: Engineer
+description: Engineering setup for repository navigation, maintainable code changes, tests, and reviews.
 controls:
   pi:
     extensions:

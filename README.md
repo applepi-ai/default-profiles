@@ -4,8 +4,9 @@ Default profile source for Outfitter users.
 
 ## Profiles
 
-- `engineer` - software engineering profile for coding, debugging, reviews, and implementation planning.
-- `data_analyst` - senior data analysis profile for dataset exploration, metric design, experiment review, business insight briefs, and executive reporting. Defaults Pi to `openai-codex` / `gpt-5.5`, and includes profile-bundled DeepWork analyst jobs plus a `/demos` skill for oil/healthcare demos.
+- `founder` - founder-operator setup for building, product thinking, research checks, dense prose, and careful delivery.
+- `engineer` - engineering setup for repository navigation, maintainable code changes, tests, and reviews.
+- `data_analyst` - data analysis setup for careful inspection, reproducible methods, assumptions, and summaries. Defaults Pi to `openai-codex` / `gpt-5.5`, and includes profile-bundled DeepWork analyst jobs plus a `/demos` skill for oil/healthcare demos.
 
 ## Data analyst DeepWork jobs
 

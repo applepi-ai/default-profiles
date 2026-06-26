@@ -1,5 +1,6 @@
 id: data_analyst
 label: Data Analyst
+description: Data analysis setup for careful inspection, reproducible methods, assumptions, and summaries.
 controls:
   pi:
     provider: openai-codex

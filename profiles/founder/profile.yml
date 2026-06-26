@@ -1,5 +1,6 @@
 id: founder
 label: Founder
+description: Founder-operator setup for building, product thinking, research checks, dense prose, and careful delivery.
 controls:
   pi:
     extensions:

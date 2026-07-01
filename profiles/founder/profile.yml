@@ -6,6 +6,8 @@ controls:
     extensions:
       - git:github.com/ai-outfitter/deepwork
       - npm:@juicesharp/rpiv-ask-user-question
+      # Founder remaps Pi thinking off ctrl+shift+t so ulta-tasklist can keep
+      # its plan toggle shortcut without emitting a startup conflict warning.
       - git:github.com/ai-outfitter/ulta-tasklist
       # Founder remaps Pi's editor/Vim yank off ctrl+y so pi-nolo can keep its
       # default shortcut without emitting a startup conflict warning.
